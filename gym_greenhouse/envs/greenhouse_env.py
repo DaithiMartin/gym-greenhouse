@@ -103,7 +103,7 @@ class GreenhouseEnv(gym.Env):
         :return: reward
         """
         # calc current reward
-        reward = -np.sum(action) - np.abs(self.inside_temp - self.ideal_temp)
+        reward = -(np.sum(action) / 100) - np.abs(self.inside_temp - self.ideal_temp)
 
         # update history
         self.reward_history[self.time] = reward
