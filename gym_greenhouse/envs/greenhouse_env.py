@@ -80,6 +80,8 @@ class GreenhouseEnv(gym.Env):
         temp_internal = self.temp_history
         plt.plot(x, temp_external, label="External")
         plt.plot(x, temp_internal, label="Internal")
+        plt.xlabel("Time")
+        plt.ylabel("Temperature")
         plt.legend()
         plt.show()
 
