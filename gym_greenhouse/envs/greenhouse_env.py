@@ -47,12 +47,12 @@ class GreenhouseEnv(gym.Env):
         done = False if self.time < 23 else True
         info = None
 
-        # terminal state, calc reward and return done
-        if done:
-            reward = -np.sum(np.abs(self.temp_history - self.ideal_temp))
-            reward = reward + np.sum(self.reward_history)
-            self.reward_history[self.time] = reward
-            return state, reward, done, info
+        # # terminal state, calc reward and return done
+        # if done:
+        #     reward = -np.sum(np.abs(self.temp_history - self.ideal_temp))
+        #     reward = reward + np.sum(self.reward_history)
+        #     self.reward_history[self.time] = reward
+        #     return state, reward, done, info
 
         # increment time
         self.time += 1
@@ -74,7 +74,6 @@ class GreenhouseEnv(gym.Env):
         return state
 
     def render(self, mode='human'):
-
         # internal vs external temperature
         x = np.arange(24)
         temp_external = self.outside_temp
@@ -104,12 +103,30 @@ class GreenhouseEnv(gym.Env):
         :return: reward
         """
         # calc current reward
-        reward = -np.sum(action)
+        reward = -np.sum(action) - np.abs(self.inside_temp - self.ideal_temp)
 
         # update history
         self.reward_history[self.time] = reward
 
         return reward
+
+    def get_state(self, action):
+        # split actions
+        heat_input = action[0]
+        cooling_input = action[1]
+
+        # generate state
+        time = self.time
+        outside_temp = self.outside_temp[self.time]
+        inside_temp = self.get_new_temp(heat_input, cooling_input)
+        ideal_temp = self.ideal_temp
+
+        state = (time, outside_temp, inside_temp, ideal_temp)
+
+        # update temp history
+        self.temp_history[self.time] = inside_temp
+
+        return state
 
     def get_new_temp(self, heat_input, cooling_input):
         specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
@@ -142,24 +159,6 @@ class GreenhouseEnv(gym.Env):
         self.inside_temp = new_temp
 
         return new_temp
-
-    def get_state(self, action):
-        # split actions
-        heat_input = action[0]
-        cooling_input = action[1]
-
-        # generate state
-        time = self.time
-        outside_temp = self.outside_temp[self.time]
-        inside_temp = self.get_new_temp(heat_input, cooling_input)
-        ideal_temp = self.ideal_temp
-
-        state = (time, outside_temp, inside_temp, ideal_temp)
-
-        # update temp history
-        self.temp_history[self.time] = inside_temp
-
-        return state
 
 
 if __name__ == '__main__':
