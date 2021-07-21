@@ -74,7 +74,17 @@ class GreenhouseEnv(gym.Env):
         return state
 
     def render(self, mode='human'):
-        pass
+
+        # internal vs external temperature
+        x = np.arange(24)
+        temp_external = self.outside_temp
+        temp_internal = self.temp_history
+        plt.plot(x, temp_external, label="External")
+        plt.plot(x, temp_internal, label="Internal")
+        plt.legend()
+        plt.show()
+
+        return None
 
     def close(self):
         pass
@@ -102,7 +112,7 @@ class GreenhouseEnv(gym.Env):
         return reward
 
     def get_new_temp(self, heat_input, cooling_input):
-        specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of normal air
+        specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
         air_volume = self.height * self.width * self.length  # m^3
 
         air_density = 1.225  # kg / m^3
