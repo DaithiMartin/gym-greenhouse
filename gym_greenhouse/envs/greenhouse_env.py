@@ -1,3 +1,8 @@
+"""
+TODO: think about the order in which actions and observations happen.
+this may be the issue with poor learning.
+actions not being connected with observations correctly
+"""
 import gym
 from gym import error, spaces, utils
 from gym.utils import seeding
@@ -18,8 +23,11 @@ class GreenhouseEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
     def __init__(self):
-        # dim_1 = heat 0-5, dim_2 = cooling 0-5
-        self.action_space = gym.spaces.MultiDiscrete([5, 5])
+        # 0-4: cooling, 5: nothing, 6-10: heating
+        self.action_space = gym.spaces.Discrete(11)
+        self.action_map = {0: -5, 1: -4, 2: -3, 3: -2, 4: -1,
+                           5: 0,
+                           6: 1, 7: 2, 8: 3, 9: 4, 10: 5}
 
         # greenhouse dimensions, typical ratio if 3:1
         self.width = 10  # meters
@@ -30,7 +38,7 @@ class GreenhouseEnv(gym.Env):
         self.observation_space = gym.spaces.Discrete(4)
         self.time = 0  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
-        self.inside_temp = 22  # initial inside temperature
+        self.inside_temp = 0  # initial inside temperature
         self.ideal_temp = 22
 
         # histories
@@ -47,14 +55,6 @@ class GreenhouseEnv(gym.Env):
         done = False if self.time < 23 else True
         info = None
 
-        # # terminal state, calc reward and return done
-        # if done:
-        #     reward = -np.sum(np.abs(self.temp_history - self.ideal_temp))
-        #     reward = reward + np.sum(self.reward_history)
-        #     self.reward_history[self.time] = reward
-        #     return state, reward, done, info
-
-        # increment time
         self.time += 1
 
         return state, reward, done, info
@@ -80,6 +80,7 @@ class GreenhouseEnv(gym.Env):
         temp_internal = self.temp_history
         plt.plot(x, temp_external, label="External")
         plt.plot(x, temp_internal, label="Internal")
+        plt.plot(x, np.full(24, self.ideal_temp), 'go', label="Ideal")
         plt.xlabel("Time")
         plt.ylabel("Temperature")
         plt.legend()
@@ -100,12 +101,18 @@ class GreenhouseEnv(gym.Env):
 
     def get_reward(self, action):
         """
-        currently reward is directly proportional to the action.
+
         :param action: action taken by agent, [heating, cooling]
         :return: reward
         """
+        # debugging
+        inside_temp = self.inside_temp
+        temp_input = self.action_map[action]
+
         # calc current reward
-        reward = -(np.sum(action) / 100) - np.abs(self.inside_temp - self.ideal_temp)
+        reward = -((self.inside_temp - self.ideal_temp) ** 2)
+
+        reward += 1000 if self.inside_temp == self.ideal_temp else -100
 
         # update history
         self.reward_history[self.time] = reward
@@ -113,14 +120,16 @@ class GreenhouseEnv(gym.Env):
         return reward
 
     def get_state(self, action):
-        # split actions
-        heat_input = action[0]
-        cooling_input = action[1]
 
         # generate state
         time = self.time
-        outside_temp = self.outside_temp[self.time]
-        inside_temp = self.get_new_temp(heat_input, cooling_input)
+        outside_temp = self.outside_temp[time]
+
+        # simplification for determining if algorithm is working
+        # inside_temp = self.get_new_temp(action)
+        inside_temp = self.inside_temp + self.action_map[action]
+        self.inside_temp = inside_temp
+
         ideal_temp = self.ideal_temp
 
         state = (time, outside_temp, inside_temp, ideal_temp)
@@ -130,7 +139,7 @@ class GreenhouseEnv(gym.Env):
 
         return state
 
-    def get_new_temp(self, heat_input, cooling_input):
+    def get_new_temp(self, action):
         specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
         air_volume = self.height * self.width * self.length  # m^3
 
@@ -155,7 +164,8 @@ class GreenhouseEnv(gym.Env):
         new_temp = T_indide - temp_change
 
         # calc new greenhouse temp after agent actions
-        new_temp = new_temp + heat_input - cooling_input
+        agent_temp_change = self.action_map[action]
+        new_temp = new_temp + agent_temp_change
 
         # update internal temperature
         self.inside_temp = new_temp
