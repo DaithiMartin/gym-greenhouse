@@ -36,31 +36,32 @@ class GreenhouseEnv(gym.Env):
 
         # state variables
         self.observation_space = gym.spaces.Discrete(4)
-        self.time = 0  # hour of the day
+        self.time = -1  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
         self.inside_temp = 0  # initial inside temperature
         self.ideal_temp = 22
+        self.temp_tolerance = 0.5
 
         # histories
         self.temp_history = np.zeros(24)  # internal temp history
         self.reward_history = np.zeros(24)  # reward history for cumulative reward at terminal state
+        self.action_history = np.zeros(24)
 
     def step(self, action):
         """
         Take a step in the environment.
         """
+        self.time += 1
 
-        state = self.get_state(action)
+        state = self.update_state(action)
         reward = self.get_reward(action)
         done = False if self.time < 23 else True
         info = None
 
-        self.time += 1
-
         return state, reward, done, info
 
     def reset(self):
-        self.time = 0  # hour of the day
+        self.time = -1  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
         self.inside_temp = 22  # initial inside temperature
         self.ideal_temp = 22
@@ -68,23 +69,33 @@ class GreenhouseEnv(gym.Env):
         # histories
         self.temp_history = np.zeros(24)  # internal temp history
         self.reward_history = np.zeros(24)  # reward history for cumulative reward at terminal state
+        self.action_history = np.zeros(24)
 
         state = (self.time, self.outside_temp[self.time], self.inside_temp, self.ideal_temp)
 
         return state
 
-    def render(self, mode='human'):
+    def render(self, mode='human', report=False):
         # internal vs external temperature
         x = np.arange(24)
         temp_external = self.outside_temp
         temp_internal = self.temp_history
+        temp_ideal = np.full(24, self.ideal_temp)
         plt.plot(x, temp_external, label="External")
         plt.plot(x, temp_internal, label="Internal")
-        plt.plot(x, np.full(24, self.ideal_temp), 'go', label="Ideal")
+        plt.fill_between(x, temp_ideal + self.temp_tolerance, temp_ideal - self.temp_tolerance,
+                         label="Ideal", alpha=0.3, color='g')
         plt.xlabel("Time")
         plt.ylabel("Temperature")
         plt.legend()
         plt.show()
+        if report:
+            print(f"Actions")
+            print(self.action_history)
+            print(f"Rewards")
+            print(self.reward_history)
+            print(f"Temps")
+            print(self.temp_history)
 
         return None
 
@@ -93,9 +104,12 @@ class GreenhouseEnv(gym.Env):
 
     @staticmethod
     def get_outside_temp():
-        base = np.arange(6)
-        base = 1.5 * base
-        temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
+
+        # base = np.arange(6)
+        # base = 1.5 * base
+        # temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
+
+        temps = np.full(24, 25)
 
         return temps
 
@@ -105,41 +119,43 @@ class GreenhouseEnv(gym.Env):
         :param action: action taken by agent, [heating, cooling]
         :return: reward
         """
-        # debugging
         inside_temp = self.inside_temp
-        temp_input = self.action_map[action]
+        ideal_temp = self.ideal_temp
+        tolerance = self.temp_tolerance
 
         # calc current reward
-        reward = -((self.inside_temp - self.ideal_temp) ** 2)
+        reward = -((inside_temp - ideal_temp) ** 2)
 
-        reward += 1000 if self.inside_temp == self.ideal_temp else -100
+        if ideal_temp + tolerance >= inside_temp >= ideal_temp - tolerance:
+            reward += 1000
 
         # update history
         self.reward_history[self.time] = reward
 
         return reward
 
-    def get_state(self, action):
+    def update_state(self, action):
 
         # generate state
         time = self.time
         outside_temp = self.outside_temp[time]
-
-        # simplification for determining if algorithm is working
-        # inside_temp = self.get_new_temp(action)
         inside_temp = self.inside_temp + self.action_map[action]
-        self.inside_temp = inside_temp
-
         ideal_temp = self.ideal_temp
-
         state = (time, outside_temp, inside_temp, ideal_temp)
 
-        # update temp history
-        self.temp_history[self.time] = inside_temp
+        # update temperate after agent action
+        self.inside_temp = inside_temp
+
+        # environments action
+        self.update_temp(action)
+
+        # update histories
+        self.temp_history[self.time] = self.inside_temp
+        self.action_history[self.time] = self.action_map[action]
 
         return state
 
-    def get_new_temp(self, action):
+    def update_temp(self, action):
         specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
         air_volume = self.height * self.width * self.length  # m^3
 
@@ -148,24 +164,21 @@ class GreenhouseEnv(gym.Env):
 
         # heat loss components
         area = 2 * self.width * self.height + 2 * self.length * self.height + self.width * self.height
-        U = 2  # typical 2 layer window value, U = 1/R, will need to be updated
+        U = 0.5  # typical 2 layer window value, U = 1/R, will need to be updated
         T_outside = self.outside_temp[self.time]
-        T_indide = self.inside_temp
+        T_inside = self.inside_temp
 
         # heat loss through conduction
-        dQ = U * area * (T_indide - T_outside)  # watts lost to environment
+        dQ = U * area * (T_outside - T_inside)  # watts lost to environment
 
-        # convert watts to jules
+        # convert watts to jules in 1 hour
+        # watt is a jule/sec
         dQ = dQ * 60 * 60  # jules lost to environment
 
         # calc new green house temp after heat loss
         temp_change = (1 / specific_heat) * dQ / mass
 
-        new_temp = T_indide - temp_change
-
-        # calc new greenhouse temp after agent actions
-        agent_temp_change = self.action_map[action]
-        new_temp = new_temp + agent_temp_change
+        new_temp = T_inside + temp_change
 
         # update internal temperature
         self.inside_temp = new_temp
