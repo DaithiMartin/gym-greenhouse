@@ -23,6 +23,10 @@ class GreenhouseEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
     def __init__(self):
+
+        # versions
+        self.diurnal_swing = True
+
         # 0-4: cooling, 5: nothing, 6-10: heating
         self.action_space = gym.spaces.Discrete(11)
         self.action_map = {0: -5, 1: -4, 2: -3, 3: -2, 4: -1,
@@ -35,54 +39,49 @@ class GreenhouseEnv(gym.Env):
         self.height = 4
 
         # state variables
-        self.observation_space = gym.spaces.Discrete(4)
-        self.time = -1  # hour of the day
+        self.observation_space = gym.spaces.Discrete(5)
+        # self.reward = 0     # try a cumulative reward
+        self.time = 0  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
-        self.inside_temp = 0  # initial inside temperature
+        # self.inside_temp = np.random.randint(0, 30)  # initial inside temperature
+        self.inside_temp = 15
         self.ideal_temp = 22
-        self.temp_tolerance = 0.5
+        self.temp_tolerance = 1
 
         # histories
         self.temp_history = np.zeros(24)  # internal temp history
-        self.reward_history = np.zeros(24)  # reward history for cumulative reward at terminal state
+        self.reward_history = []  # reward history for cumulative reward at terminal state
         self.action_history = np.zeros(24)
+        self.temp_change_history = np.zeros(24)
+
 
     def step(self, action):
         """
         Take a step in the environment.
         """
-        self.time += 1
 
         state = self.update_state(action)
         reward = self.get_reward(action)
-        done = False if self.time < 23 else True
+        done = False if self.time < 24 else True
         info = None
 
         return state, reward, done, info
 
     def reset(self):
-        self.time = -1  # hour of the day
-        self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
-        self.inside_temp = 22  # initial inside temperature
-        self.ideal_temp = 22
 
-        # histories
-        self.temp_history = np.zeros(24)  # internal temp history
-        self.reward_history = np.zeros(24)  # reward history for cumulative reward at terminal state
-        self.action_history = np.zeros(24)
-
-        state = (self.time, self.outside_temp[self.time], self.inside_temp, self.ideal_temp)
+        self.__init__()
+        state = self.get_state()
 
         return state
 
     def render(self, mode='human', report=False):
         # internal vs external temperature
         x = np.arange(24)
-        temp_external = self.outside_temp
+        temp_external = self.outside_temp[:-1]      # exclude last time becuase thats hour 25
         temp_internal = self.temp_history
         temp_ideal = np.full(24, self.ideal_temp)
         plt.plot(x, temp_external, label="External")
-        plt.plot(x, temp_internal, label="Internal")
+        plt.plot(x, temp_internal, 'o-', label="Internal")
         plt.fill_between(x, temp_ideal + self.temp_tolerance, temp_ideal - self.temp_tolerance,
                          label="Ideal", alpha=0.3, color='g')
         plt.xlabel("Time")
@@ -102,15 +101,16 @@ class GreenhouseEnv(gym.Env):
     def close(self):
         pass
 
-    @staticmethod
-    def get_outside_temp():
+    def get_outside_temp(self):
 
-        # base = np.arange(6)
-        # base = 1.5 * base
-        # temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
-
-        temps = np.full(24, 25)
-
+        if self.diurnal_swing:
+            base = np.arange(6)
+            base = 1.5 * base
+            temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
+            temps = np.concatenate((temps, np.array([22])))
+        else:
+            # temps = np.full(24, np.random.randint(17, 22))
+            temps = np.full(25, 25)     # len() = 25 because need post ternimal info for last sarSa
         return temps
 
     def get_reward(self, action):
@@ -124,36 +124,57 @@ class GreenhouseEnv(gym.Env):
         tolerance = self.temp_tolerance
 
         # calc current reward
-        reward = -((inside_temp - ideal_temp) ** 2)
+        reward = -((inside_temp - ideal_temp) ** 2) * 100
 
         if ideal_temp + tolerance >= inside_temp >= ideal_temp - tolerance:
             reward += 1000
 
         # update history
-        self.reward_history[self.time] = reward
+        self.reward_history.append(reward)
 
         return reward
 
-    def update_state(self, action):
-
-        # generate state
+    def get_state(self):
+        # state = (self.time, self.outside_temp[self.time], self.inside_temp, self.ideal_temp)
+        # state = np.array((self.time, self.outside_temp[self.time], self.inside_temp, self.ideal_temp - self.inside_temp))
         time = self.time
         outside_temp = self.outside_temp[time]
-        inside_temp = self.inside_temp + self.action_map[action]
+        inside_temp = self.inside_temp
         ideal_temp = self.ideal_temp
-        state = (time, outside_temp, inside_temp, ideal_temp)
+        in_tolarance = 1 if ideal_temp - self.temp_tolerance <= inside_temp <= ideal_temp + self.temp_tolerance else 0
+        state = [time,
+                 outside_temp,
+                 inside_temp,
+                 ideal_temp - inside_temp,
+                 in_tolarance
+                 ]
 
-        # update temperate after agent action
-        self.inside_temp = inside_temp
+        return np.array(state)
 
-        # environments action
+    def update_state(self, action):
+
+        # agent tackes action
+        self.inside_temp = self.inside_temp + self.action_map[action]
+
+        # environment reacts
         self.update_temp(action)
 
         # update histories
         self.temp_history[self.time] = self.inside_temp
         self.action_history[self.time] = self.action_map[action]
 
-        return state
+        # increment time
+        self.time += 1
+
+        # collect state
+        nominal = 1 if self.inside_temp + self.temp_tolerance >= self.inside_temp >= self.inside_temp - self.temp_tolerance else 0
+        state = [self.time,
+                 self.outside_temp[self.time],
+                 self.inside_temp,
+                 self.ideal_temp - self.inside_temp,
+                 nominal]
+
+        return np.array(state)
 
     def update_temp(self, action):
         specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
@@ -178,12 +199,13 @@ class GreenhouseEnv(gym.Env):
         # calc new green house temp after heat loss
         temp_change = (1 / specific_heat) * dQ / mass
 
+        self.temp_change_history[self.time] = temp_change
+
         new_temp = T_inside + temp_change
 
-        # update internal temperature
         self.inside_temp = new_temp
 
-        return new_temp
+        return None
 
 
 if __name__ == '__main__':
