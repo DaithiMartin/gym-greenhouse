@@ -27,11 +27,11 @@ class GreenhouseEnv(gym.Env):
         # versions
         self.diurnal_swing = True
 
-        # 0-4: cooling, 5: nothing, 6-10: heating
-        self.action_space = gym.spaces.Discrete(11)
-        self.action_map = {0: -5, 1: -4, 2: -3, 3: -2, 4: -1,
-                           5: 0,
-                           6: 1, 7: 2, 8: 3, 9: 4, 10: 5}
+        # cooling and heating with discrete steps
+        self.action_space = gym.spaces.Discrete(21)
+        self.action_min = -10
+        self.action_max = 10
+        self.action_map = self.get_action_map()
 
         # greenhouse dimensions, typical ratio if 3:1
         self.width = 10  # meters
@@ -54,7 +54,18 @@ class GreenhouseEnv(gym.Env):
         self.reward_history = []  # reward history for cumulative reward at terminal state
         self.action_history = np.zeros(24)
         self.temp_change_history = np.zeros(24)
+        self.rad_temp_change_history = np.zeros(24)
 
+    def get_action_map(self):
+
+        action_range = range(self.action_min, self.action_max + 1)
+        num_actions = self.action_space.n
+        index_range = range(num_actions)
+        action_map = {}
+        for index, action in zip(index_range, action_range):
+            action_map[index] = action
+
+        return action_map
 
     def step(self, action):
         """
@@ -234,6 +245,8 @@ class GreenhouseEnv(gym.Env):
         dQ = radation * factor
         temp_change = (1 / specific_heat) * dQ / mass
 
+        self.rad_temp_change_history[self.time] = temp_change
+
         # update internal representation of temperature
         T_inside = self.inside_temp
 
@@ -244,13 +257,20 @@ class GreenhouseEnv(gym.Env):
         return temp_change
 
     def update_temp(self, action):
-        temp_change = 0
-        temp_change += self.update_radiative_flow()
-        temp_change += self.update_conductive_heat()
+        # temp_change = 0
+        radiation_change = self.update_radiative_flow()
+        conductive_change = self.update_conductive_heat()
+
+        temp_change = radiation_change + conductive_change
 
         self.temp_change_history[self.time] = temp_change
 
         return None
+
+    def report(self):
+        # TODO: COMPLETE ME WITH HISTORY REPORT
+        """probably use a pandas dataframe for display"""
+        pass
 
 
 if __name__ == '__main__':
@@ -258,23 +278,27 @@ if __name__ == '__main__':
 
     observation = env.reset()
     print(f"Initial Observation: {observation}")
+    # actions = [9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7, 9, 10, 10, 10, 10, 8, 7, 7, 5]
     for t in range(50):
-        # action = env.action_space.sample()
-        action = 5
+        action = env.action_space.sample()
+        # action = actions[t]
         observation, reward, done, info = env.step(action)
         print(f"Observation {t + 1}: {observation}")
         if done:
             print("Episode finished after {} time-steps".format(t + 1))
             break
 
-    print(f"temp history{env.temp_history}, Length: {len(env.temp_history)}")
-    print(f"reward history {env.reward_history}, Length: {len(env.reward_history)}")
-    print(f"temp change history{env.temp_change_history}, Length: {len(env.temp_change_history)}")
+    print(f"temp history: {env.temp_history}, Length: {len(env.temp_history)}")
+    print(f"reward history: {env.reward_history}, Length: {len(env.reward_history)}")
+    print(f"temp change history: {env.temp_change_history}, Length: {len(env.temp_change_history)}")
+    print(f"Action history: {env.action_history}")
+    print(f"rad temp change history: {env.rad_temp_change_history}")
 
-    x = np.arange(24)
-    temp_external = env.outside_temp[:-1]
-    temp_internal = env.temp_history
-    plt.plot(x, temp_external, label="External")
-    plt.plot(x, temp_internal, label="Internal")
-    plt.legend()
-    plt.show()
+    env.render()
+    # x = np.arange(24)
+    # temp_external = env.outside_temp[:-1]
+    # temp_internal = env.temp_history
+    # plt.plot(x, temp_external, label="External")
+    # plt.plot(x, temp_internal, label="Internal")
+    # plt.legend()
+    # plt.show()
