@@ -154,14 +154,14 @@ class GreenhouseContinuousEnv(gym.Env):
     def update_state(self, action):
 
         # agent tackes action
-        self.inside_temp = self.inside_temp + action.item()
+        self.inside_temp = self.inside_temp + (action.item() * 5)
 
         # environment reacts
         self.update_temp(action)
 
         # update histories
         self.temp_history[self.time] = self.inside_temp
-        self.action_history[self.time] = action.item()
+        self.action_history[self.time] = action.item() * 5
 
         # increment time
         self.time += 1
