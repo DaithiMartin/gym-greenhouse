@@ -241,7 +241,7 @@ class GreenhouseEnv(gym.Env):
 
         air_density = 1.225  # kg / m^3
         mass = air_volume * air_density  # kg
-        factor = 2e6
+        factor = 1e6
         dQ = radation * factor
         temp_change = (1 / specific_heat) * dQ / mass
 
