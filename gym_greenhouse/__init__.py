@@ -7,5 +7,5 @@ register(
 
 register(
     id='greenhouse-continuous-v0',
-    entry_point='gym_greenhouse.envs:ContinuousGreenhouseEnv'
+    entry_point='gym_greenhouse.envs:GreenhouseContinuousEnv'
 )
