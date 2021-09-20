@@ -12,9 +12,10 @@ import matplotlib.pyplot as plt
 #     temp += 1.5 * sign
 #     daily_temp.append(temp)
 # print(daily_temp)
-base = np.arange(6)
-base = 1.5 * base
-temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
+swing = np.arange(6)
+swing = 1.5 * swing
+base_line = 0
+temps = np.array((swing + base_line, base_line + swing[::-1], np.full(6, base_line), np.full(6, base_line))).flatten()
 x = np.arange(24)
 y = temps
 

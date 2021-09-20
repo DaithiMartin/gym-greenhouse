@@ -43,6 +43,7 @@ class GreenhouseEnv(gym.Env):
         # self.reward = 0     # try a cumulative reward
         self.time = 0  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
+        self.solar_radiation = self.get_radiative_heat()
         # self.inside_temp = np.random.randint(0, 30)  # initial inside temperature
         self.inside_temp = 15
         self.ideal_temp = 22
@@ -135,8 +136,7 @@ class GreenhouseEnv(gym.Env):
         return reward
 
     def get_state(self):
-        # state = (self.time, self.outside_temp[self.time], self.inside_temp, self.ideal_temp)
-        # state = np.array((self.time, self.outside_temp[self.time], self.inside_temp, self.ideal_temp - self.inside_temp))
+
         time = self.time
         outside_temp = self.outside_temp[time]
         inside_temp = self.inside_temp
@@ -153,7 +153,7 @@ class GreenhouseEnv(gym.Env):
 
     def update_state(self, action):
 
-        # agent tackes action
+        # agent takes action
         self.inside_temp = self.inside_temp + self.action_map[action]
 
         # environment reacts
@@ -176,7 +176,8 @@ class GreenhouseEnv(gym.Env):
 
         return np.array(state)
 
-    def update_temp(self, action):
+    def update_conductive_heat(self):
+
         specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
         air_volume = self.height * self.width * self.length  # m^3
 
@@ -189,8 +190,9 @@ class GreenhouseEnv(gym.Env):
         T_outside = self.outside_temp[self.time]
         T_inside = self.inside_temp
 
-        # heat loss through conduction
+        # heat lost by system through conduction
         dQ = U * area * (T_outside - T_inside)  # watts lost to environment
+        time = self.time
 
         # convert watts to jules in 1 hour
         # watt is a jule/sec
@@ -199,11 +201,48 @@ class GreenhouseEnv(gym.Env):
         # calc new green house temp after heat loss
         temp_change = (1 / specific_heat) * dQ / mass
 
-        self.temp_change_history[self.time] = temp_change
+        new_temp = T_inside + temp_change
+
+        self.inside_temp = new_temp
+
+        return temp_change
+
+    @staticmethod
+    def get_radiative_heat():
+        swing = np.arange(6)
+        swing = 1.5 * swing
+        base_line = 0
+        radiation = np.array(
+            (swing + base_line, base_line + swing[::-1], np.full(6, base_line), np.full(6, base_line))).flatten()
+
+        return radiation
+
+    def update_radiative_flow(self):
+        # FIXME: THIS IS FUNCTIONING BUT NEEDS SIGNIFICANT WORK TO BE MORE REPRESENTATIVE OF REALITY
+        radation = self.solar_radiation[self.time]
+        specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
+        air_volume = self.height * self.width * self.length  # m^3
+
+        air_density = 1.225  # kg / m^3
+        mass = air_volume * air_density  # kg
+        factor = 2e6
+        dQ = radation * factor
+        temp_change = (1 / specific_heat) * dQ / mass
+
+        T_inside = self.inside_temp
 
         new_temp = T_inside + temp_change
 
         self.inside_temp = new_temp
+
+        return temp_change
+
+    def update_temp(self, action):
+        temp_change = 0
+        temp_change += self.update_radiative_flow()
+        temp_change += self.update_conductive_heat()
+
+        self.temp_change_history[self.time] = temp_change
 
         return None
 
@@ -215,7 +254,7 @@ if __name__ == '__main__':
     print(f"Initial Observation: {observation}")
     for t in range(50):
         # action = env.action_space.sample()
-        action = [0, 0]
+        action = 5
         observation, reward, done, info = env.step(action)
         print(f"Observation {t + 1}: {observation}")
         if done:
@@ -224,9 +263,10 @@ if __name__ == '__main__':
 
     print(f"temp history{env.temp_history}, Length: {len(env.temp_history)}")
     print(f"reward history {env.reward_history}, Length: {len(env.reward_history)}")
+    print(f"temp change history{env.temp_change_history}, Length: {len(env.temp_change_history)}")
 
     x = np.arange(24)
-    temp_external = env.outside_temp
+    temp_external = env.outside_temp[:-1]
     temp_internal = env.temp_history
     plt.plot(x, temp_external, label="External")
     plt.plot(x, temp_internal, label="Internal")
