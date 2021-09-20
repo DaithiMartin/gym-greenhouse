@@ -1,1 +1,2 @@
 from gym_greenhouse.envs.greenhouse_env import GreenhouseEnv
+from gym_greenhouse.envs.greenhouse_continuous_env import GreenhouseContinuousEnv
