@@ -218,6 +218,8 @@ class GreenhouseEnv(gym.Env):
         radiation = np.array(
             (swing + base_line, base_line + swing[::-1], np.full(6, base_line), np.full(6, base_line))).flatten()
 
+        radiation = np.concatenate((radiation, np.zeros(1)))
+
         return radiation
 
     def update_radiative_flow(self):
