@@ -39,7 +39,7 @@ class GreenhouseEnv(gym.Env):
         self.height = 4
 
         # state variables
-        self.observation_space = gym.spaces.Discrete(5)
+        self.observation_space = gym.spaces.Discrete(6)
         # self.reward = 0     # try a cumulative reward
         self.time = 0  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
@@ -141,11 +141,13 @@ class GreenhouseEnv(gym.Env):
         outside_temp = self.outside_temp[time]
         inside_temp = self.inside_temp
         ideal_temp = self.ideal_temp
+        radiation = self.solar_radiation[time]
         in_tolarance = 1 if ideal_temp - self.temp_tolerance <= inside_temp <= ideal_temp + self.temp_tolerance else 0
         state = [time,
                  outside_temp,
                  inside_temp,
                  ideal_temp - inside_temp,
+                 radiation,
                  in_tolarance
                  ]
 
@@ -172,6 +174,7 @@ class GreenhouseEnv(gym.Env):
                  self.outside_temp[self.time],
                  self.inside_temp,
                  self.ideal_temp - self.inside_temp,
+                 self.solar_radiation[self.time],
                  nominal]
 
         return np.array(state)
@@ -229,6 +232,7 @@ class GreenhouseEnv(gym.Env):
         dQ = radation * factor
         temp_change = (1 / specific_heat) * dQ / mass
 
+        # update internal representation of temperature
         T_inside = self.inside_temp
 
         new_temp = T_inside + temp_change
