@@ -269,7 +269,7 @@ import matplotlib.pyplot as plt
 #         pass
 #
 
-from greenhouse_base import GreenhouseBaseEnv
+from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
 
 
 class GreenhouseDiscreteEnv(GreenhouseBaseEnv):

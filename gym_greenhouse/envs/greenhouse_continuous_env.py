@@ -4,7 +4,7 @@ from gym import error, spaces, utils
 from gym.utils import seeding
 import numpy as np
 import matplotlib.pyplot as plt
-from greenhouse_base import GreenhouseBaseEnv
+from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
 
 
 #
