@@ -13,7 +13,7 @@ class GreenhouseContinuousEnv(GreenhouseBaseEnv):
     def get_action_space(self):
         """Defines a continuous action space."""
         action_space = gym.spaces.Box(
-            np.array([-self.action_min]).astype(np.float32),
+            np.array([self.action_min]).astype(np.float32),
             np.array([self.action_max]).astype(np.float32),
         )
         return action_space
