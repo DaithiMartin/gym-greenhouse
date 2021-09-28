@@ -1,8 +1,3 @@
-"""
-TODO: think about the order in which actions and observations happen.
-this may be the issue with poor learning.
-actions not being connected with observations correctly
-"""
 import gym
 from gym import error, spaces, utils
 from gym.utils import seeding
@@ -10,8 +5,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-class GreenhouseEnv(gym.Env):
+class GreenhouseBaseEnv(gym.Env):
     """
+    This is a Base Class for the Greenhouse Gym Environments.
+
+    This class is to be extended to a continuous and discrete form.
+    The continuous form is used for Policy based methods and the discrete form is for value based methods.
+
     Starting episode will be 1 Day.
     Each step will be 1 hr.
 
@@ -24,13 +24,15 @@ class GreenhouseEnv(gym.Env):
 
     def __init__(self):
 
+        super(GreenhouseBaseEnv, self).__init__()
+
         # versions
         self.diurnal_swing = True
 
         # cooling and heating with discrete steps
-        self.action_space = gym.spaces.Discrete(21)
         self.action_min = -10
         self.action_max = 10
+        self.action_space = self.get_action_space()
         self.action_map = self.get_action_map()
 
         # greenhouse dimensions, typical ratio if 3:1
@@ -40,32 +42,33 @@ class GreenhouseEnv(gym.Env):
 
         # state variables
         self.observation_space = gym.spaces.Discrete(6)
-        # self.reward = 0     # try a cumulative reward
         self.time = 0  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
         self.solar_radiation = self.get_radiative_heat()
-        # self.inside_temp = np.random.randint(0, 30)  # initial inside temperature
         self.inside_temp = 15
         self.ideal_temp = 22
         self.temp_tolerance = 1
 
         # histories
-        self.temp_history = np.zeros(24)  # internal temp history
-        self.reward_history = []  # reward history for cumulative reward at terminal state
-        self.action_history = np.zeros(24)
-        self.temp_change_history = np.zeros(24)
-        self.rad_temp_change_history = np.zeros(24)
+        self.temp_history = []  # internal temp history for episode
+        self.reward_history = []    # reward history for episode
+        self.action_history = []    # action history for episode
+        self.temp_change_history = []   # env temp change history for episode
+        self.rad_temp_change_history = []   # radiative component of env temp change history for episode
+
+    def get_action_space(self):
+        """Defines a discrete or continuous action space"""
+
+        raise NotImplementedError("Define an action space!")
+
+        pass
 
     def get_action_map(self):
+        """returns a fucntion that maps """
 
-        action_range = range(self.action_min, self.action_max + 1)
-        num_actions = self.action_space.n
-        index_range = range(num_actions)
-        action_map = {}
-        for index, action in zip(index_range, action_range):
-            action_map[index] = action
+        raise NotImplementedError("Define an action map!")
 
-        return action_map
+        pass
 
     def step(self, action):
         """
@@ -80,6 +83,7 @@ class GreenhouseEnv(gym.Env):
         return state, reward, done, info
 
     def reset(self):
+        """Re-initialize Environment and return starting state"""
 
         self.__init__()
         state = self.get_state()
@@ -126,11 +130,6 @@ class GreenhouseEnv(gym.Env):
         return temps
 
     def get_reward(self, action):
-        """
-
-        :param action: action taken by agent, [heating, cooling]
-        :return: reward
-        """
         inside_temp = self.inside_temp
         ideal_temp = self.ideal_temp
         tolerance = self.temp_tolerance
@@ -167,14 +166,14 @@ class GreenhouseEnv(gym.Env):
     def update_state(self, action):
 
         # agent takes action
-        self.inside_temp = self.inside_temp + self.action_map[action]
+        self.inside_temp = self.inside_temp + self.action_map(action)
 
         # environment reacts
         self.update_temp(action)
 
         # update histories
-        self.temp_history[self.time] = self.inside_temp
-        self.action_history[self.time] = self.action_map[action]
+        self.temp_history.append(self.inside_temp)
+        self.action_history.append(self.action_map(action))
 
         # increment time
         self.time += 1
@@ -190,7 +189,7 @@ class GreenhouseEnv(gym.Env):
 
         return np.array(state)
 
-    def update_conductive_heat(self):
+    def update_conductive_flow(self):
 
         specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
         air_volume = self.height * self.width * self.length  # m^3
@@ -245,7 +244,7 @@ class GreenhouseEnv(gym.Env):
         dQ = radation * factor
         temp_change = (1 / specific_heat) * dQ / mass
 
-        self.rad_temp_change_history[self.time] = temp_change
+        self.rad_temp_change_history.append(temp_change)
 
         # update internal representation of temperature
         T_inside = self.inside_temp
@@ -257,13 +256,13 @@ class GreenhouseEnv(gym.Env):
         return temp_change
 
     def update_temp(self, action):
-        # temp_change = 0
+
         radiation_change = self.update_radiative_flow()
-        conductive_change = self.update_conductive_heat()
+        conductive_change = self.update_conductive_flow()
 
         temp_change = radiation_change + conductive_change
 
-        self.temp_change_history[self.time] = temp_change
+        self.temp_change_history.append(temp_change)
 
         return None
 
@@ -274,31 +273,5 @@ class GreenhouseEnv(gym.Env):
 
 
 if __name__ == '__main__':
-    env = GreenhouseEnv()
+    env = GreenhouseBaseEnv()
 
-    observation = env.reset()
-    print(f"Initial Observation: {observation}")
-    # actions = [9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7, 9, 10, 10, 10, 10, 8, 7, 7, 5]
-    for t in range(50):
-        action = env.action_space.sample()
-        # action = actions[t]
-        observation, reward, done, info = env.step(action)
-        print(f"Observation {t + 1}: {observation}")
-        if done:
-            print("Episode finished after {} time-steps".format(t + 1))
-            break
-
-    print(f"temp history: {env.temp_history}, Length: {len(env.temp_history)}")
-    print(f"reward history: {env.reward_history}, Length: {len(env.reward_history)}")
-    print(f"temp change history: {env.temp_change_history}, Length: {len(env.temp_change_history)}")
-    print(f"Action history: {env.action_history}")
-    print(f"rad temp change history: {env.rad_temp_change_history}")
-
-    env.render()
-    # x = np.arange(24)
-    # temp_external = env.outside_temp[:-1]
-    # temp_internal = env.temp_history
-    # plt.plot(x, temp_external, label="External")
-    # plt.plot(x, temp_internal, label="Internal")
-    # plt.legend()
-    # plt.show()
