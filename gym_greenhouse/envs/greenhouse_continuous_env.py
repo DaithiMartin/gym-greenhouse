@@ -36,7 +36,8 @@ if __name__ == '__main__':
     observation = env.reset()
     print(f"Initial Observation: {observation}")
     for t in range(50):
-        action = env.action_space.sample()
+        # action = env.action_space.sample()
+        action = np.array(0.0)
         observation, reward, done, info = env.step(action)
         print(f"Observation {t + 1}: {observation}")
         if done:

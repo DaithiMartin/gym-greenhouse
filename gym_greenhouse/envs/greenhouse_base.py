@@ -7,15 +7,19 @@ class GreenhouseBaseEnv(gym.Env):
     """
     This is a Base Class for the Greenhouse Gym Environments.
 
-    This class is to be extended to a continuous and discrete form.
+    This base class should be extended to either a continuous and discrete form.
     The continuous form is used for Policy based methods and the discrete form is for value based methods.
 
     Starting episode will be 1 Day.
     Each step will be 1 hr.
 
-    Assumptions:
-    1. Heat loss from GH does not affect outside temperature.
-    2. No heat loss through the ground
+    Current implementation based on: https://www.sciencedirect.com/science/article/pii/S0168169909001902
+
+    Initial implementation based on:
+    - single wall A-frame
+    - 2 air exchanges per hour
+    - evapotranspiration for large crop
+    - Q_GRout calculated over 12 hour interval
 
     """
     metadata = {'render.modes': ['human']}
@@ -27,11 +31,18 @@ class GreenhouseBaseEnv(gym.Env):
         # versions
         self.diurnal_swing = True
 
+        # simulation fields
+        self.d_t = 1  # hours
+
         # cooling and heating with discrete steps
-        self.action_min = -10
-        self.action_max = 10
-        self.action_space = self.get_action_space()
-        self.action_map = self.get_action_map()
+        # FIXME: action space needs to be calibrated to new physics
+        self.num_heaters = 1
+        self.action_max = 1e3  # Watts
+        self.action_min = -1e3  # Watts
+        self.action_space = self.get_action_space()  # needs to be extended in specific implementation
+
+        # FIXME: CHECK TO SEE IF THIS IS THE BEST WAY TO GET THIS FUNCTION
+        self.action_map = self.get_action_map()  # needs to be extended in specific implementation
 
         # greenhouse dimensions, typical ratio if 3:1
         self.width = 10  # meters
@@ -43,30 +54,30 @@ class GreenhouseBaseEnv(gym.Env):
         self.time = 0  # hour of the day
         self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
         self.solar_radiation = self.get_radiative_heat()
-        self.inside_temp = 15
+        self.inside_temp = 22
         self.ideal_temp = 22
         self.temp_tolerance = 1
 
         # histories
         self.temp_history = []  # internal temp history for episode
-        self.reward_history = []    # reward history for episode
-        self.action_history = []    # action history for episode
-        self.temp_change_history = []   # env temp change history for episode
-        self.rad_temp_change_history = []   # radiative component of env temp change history for episode
+        self.reward_history = []  # reward history for episode
+        self.action_history = []  # action history for episode
+        self.temp_change_history = []  # env temp change history for episode
+        self.rad_temp_change_history = []  # radiative component of env temp change history for episode
 
     def get_action_space(self):
         """Defines a discrete or continuous action space"""
 
         raise NotImplementedError("Define an action space!")
 
-        pass
+        None
 
     def get_action_map(self):
         """returns a fucntion that maps """
 
         raise NotImplementedError("Define an action map!")
 
-        pass
+        None
 
     def step(self, action):
         """
@@ -89,9 +100,10 @@ class GreenhouseBaseEnv(gym.Env):
         return state
 
     def render(self, mode='human', report=False):
+        """Display episode visualization."""
         # internal vs external temperature
         x = np.arange(24)
-        temp_external = self.outside_temp[:-1]      # exclude last time becuase thats hour 25
+        temp_external = self.outside_temp[:-1]  # exclude last time becuase thats hour 25
         temp_internal = self.temp_history
         temp_ideal = np.full(24, self.ideal_temp)
         plt.plot(x, temp_external, label="External")
@@ -124,10 +136,11 @@ class GreenhouseBaseEnv(gym.Env):
             temps = np.concatenate((temps, np.array([22])))
         else:
             # temps = np.full(24, np.random.randint(17, 22))
-            temps = np.full(25, 25)     # len() = 25 because need post ternimal info for last sarSa
+            temps = np.full(25, 25)  # len() = 25 because need post ternimal info for last sarSa
         return temps
 
     def get_reward(self, action):
+        # TODO: IMPLEMENT CLIFFING REWARD FUNCTION
         inside_temp = self.inside_temp
         ideal_temp = self.ideal_temp
         tolerance = self.temp_tolerance
@@ -144,6 +157,7 @@ class GreenhouseBaseEnv(gym.Env):
         return reward
 
     def get_state(self):
+        """Returns observation tuple"""
 
         time = self.time
         outside_temp = self.outside_temp[time]
@@ -163,11 +177,9 @@ class GreenhouseBaseEnv(gym.Env):
 
     def update_state(self, action):
 
-        # agent takes action
-        self.inside_temp = self.inside_temp + self.action_map(action)
-
-        # environment reacts
-        self.update_temp(action)
+        # agent takes action and environment reacts
+        self.update_inside_temp(action)
+        self.update_humidity(action)
 
         # update histories
         self.temp_history.append(self.inside_temp)
@@ -220,49 +232,76 @@ class GreenhouseBaseEnv(gym.Env):
 
     @staticmethod
     def get_radiative_heat():
-        swing = np.arange(6)
-        swing = 1.5 * swing
-        base_line = 0
-        radiation = np.array(
-            (swing + base_line, base_line + swing[::-1], np.full(6, base_line), np.full(6, base_line))).flatten()
 
-        radiation = np.concatenate((radiation, np.zeros(1)))
+        # peak Q_GRout
+        max_Q_GRout = 1025  # W m^-2
+        day_length = 12
+        day = np.sin(np.linspace(0, np.pi, day_length)) * max_Q_GRout
+        night = np.zeros(13)
 
-        return radiation
+        Q_GRout = np.concatenate((day, night))
 
-    def update_radiative_flow(self):
-        # FIXME: THIS IS FUNCTIONING BUT NEEDS SIGNIFICANT WORK TO BE MORE REPRESENTATIVE OF REALITY
-        radation = self.solar_radiation[self.time]
-        specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
-        air_volume = self.height * self.width * self.length  # m^3
+        return Q_GRout
 
-        air_density = 1.225  # kg / m^3
-        mass = air_volume * air_density  # kg
-        factor = 1e6
-        dQ = radation * factor
-        temp_change = (1 / specific_heat) * dQ / mass
+    def update_inside_temp(self, action):
+        """
+        Energy Mass Balance for internal heat.
 
-        self.rad_temp_change_history.append(temp_change)
+        Q_GRin + Q_heater = Q_IV + Q_glazing
 
-        # update internal representation of temperature
-        T_inside = self.inside_temp
+        all units: W m^-2
+        """
+        # TODO: convert (W m^-2) to (J hr^-1 m^-2) ** should be corrected start by running unit tests
+        # Q_heater
+        num_heaters = self.num_heaters
+        ground_surface = self.width * self.height
+        heater_capacity = self.action_map(action)
+        Q_heater = num_heaters * heater_capacity / ground_surface
 
-        new_temp = T_inside + temp_change
+        # Q_GRin
+        tau_c = 0.9  # solar radiation transmittance of glazing material (dimensionless)
+        rho_g = 0.5  # reflectance of solar radiation on ground (dimensionless)
+        Q_GRout = self.solar_radiation[self.time]  # global outside radiation (W m^-2)
+        Q_GRin = tau_c * (1 - rho_g) * Q_GRout
 
-        self.inside_temp = new_temp
+        # Q_IV
+        # latent heat loss
+        L = 2.5e6  # latent heat of vaporization (J kg^-1)
+        E = (3e-4 * tau_c * Q_GRin + 0.0021) / 15 / 60  # evapotranspiration rate (kg m^-2 15min^-1) /15min /60 sec
+        E = 0
 
-        return temp_change
+        # sensible heat loss
+        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
+        Cp = 1010  # specific heat of moist air (J kg^-1 K^-1)
+        rho = 1.2  # specific mass of air  (kg dry air m^-3)
+        T_in = self.inside_temp
+        T_out = self.outside_temp[self.time]
+        latent_loss = L * E
+        sensible_loss = qv * Cp * rho * (T_in - T_out)
+        Q_IV = latent_loss + sensible_loss
 
-    def update_temp(self, action):
+        # Q_glazing
+        w = 2.2  # ratio of glazing surfaces to ground surface (dimensionless)
+        k = 6.2  # heat transfer coefficient (W m^-2 C^-1)
+        Q_glazing = k * w * (T_in - T_out)
 
-        radiation_change = self.update_radiative_flow()
-        conductive_change = self.update_conductive_flow()
+        # first order Euler estimation
+        H = 6.3  # average greenhouse height (m)
 
-        temp_change = radiation_change + conductive_change
+        d_Temp = 1 / (Cp * rho * H) * (Q_GRin + Q_heater - Q_IV - Q_glazing)  # deg C s^-1
+        # d_Temp = 1 / (Cp * rho * H) * (Q_GRin + Q_heater - Q_glazing)
 
-        self.temp_change_history.append(temp_change)
+        d_Temp = d_Temp * 60  # deg C hr^-1
+
+        self.inside_temp = self.inside_temp + d_Temp * self.d_t
+
+        # add temp change to history
+        self.temp_change_history.append(d_Temp)
 
         return None
+
+    def update_humidity(self, action):
+        pass
 
     def report(self):
         # TODO: COMPLETE ME WITH HISTORY REPORT
@@ -272,4 +311,3 @@ class GreenhouseBaseEnv(gym.Env):
 
 if __name__ == '__main__':
     env = GreenhouseBaseEnv()
-

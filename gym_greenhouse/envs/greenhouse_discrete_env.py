@@ -1,6 +1,7 @@
 
 import gym
 from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
+from numpy import linspace
 
 
 class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
@@ -14,15 +15,15 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
 
     def get_action_space(self):
 
-        num_actions = self.action_max - self.action_min + 1
+        num_actions = 21
         action_space = gym.spaces.Discrete(num_actions)
 
         return action_space
 
     def generate_action_dict(self):
 
-        action_range = range(self.action_min, self.action_max + 1)
         num_actions = self.action_space.n
+        action_range = linspace(self.action_min, self.action_max, num_actions)
         index_range = range(num_actions)
         action_dict = {}
         for index, action in zip(index_range, action_range):
@@ -40,13 +41,16 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
 
 if __name__ == '__main__':
     env = GreenhouseDiscreteEnv()
+    print(f"Action Space: {env.action_space}")
+    print(f"Observation Space: {env.observation_space}")
 
     observation = env.reset()
     print(f"Initial Observation: {observation}")
     # actions = [9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7, 9, 10, 10, 10, 10, 8, 7, 7, 5]
     for t in range(50):
-        action = env.action_space.sample()
-        # action = actions[t]
+        # action = env.action_space.sample()    # random action
+        action = env.action_space.n // 2        # take no action
+        # action = actions[t]                   # specific trajectory
         observation, reward, done, info = env.step(action)
         print(f"Observation {t + 1}: {observation}")
         if done:
