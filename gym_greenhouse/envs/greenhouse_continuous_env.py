@@ -23,7 +23,7 @@ class GreenhouseContinuousEnv(GreenhouseBaseEnv):
 
         Currently assumes that self.action_max and self.action_min are equidistant from no-action
         """
-
+        # TODO: SHOW FACTORY TO GEORGE
         def action_map(agent_action):
             action = agent_action.item() * self.action_max
             return action

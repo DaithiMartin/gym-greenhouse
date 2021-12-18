@@ -1,6 +1,8 @@
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Union, Callable
+from numpy.typing import ArrayLike
 
 
 class GreenhouseBaseEnv(gym.Env):
@@ -29,55 +31,55 @@ class GreenhouseBaseEnv(gym.Env):
         super(GreenhouseBaseEnv, self).__init__()
 
         # versions
-        self.diurnal_swing = True
+        self.diurnal_swing: bool = True
 
         # simulation fields
-        self.d_t = 1  # hours
+        self.d_t: int = 1  # hours
 
         # cooling and heating with discrete steps
-        # FIXME: action space needs to be calibrated to new physics
-        self.num_heaters = 1
-        self.action_max = 1e3  # Watts
-        self.action_min = -1e3  # Watts
-        self.action_space = self.get_action_space()  # needs to be extended in specific implementation
+        # NOTE: action space needs to be calibrated to new physics
+        self.num_heaters: int = 1
+        self.action_max: float = 1e3  # Watts
+        self.action_min: float = -1e3  # Watts
+        self.action_space: gym.spaces = self.get_action_space()  # needs to be extended in specific implementation
 
-        # FIXME: CHECK TO SEE IF THIS IS THE BEST WAY TO GET THIS FUNCTION
-        self.action_map = self.get_action_map()  # needs to be extended in specific implementation
+        # FIXME: ASK GEORGE HOW TO ANNOTATE
+        self.action_map: Union[dict, Callable] = self.get_action_map()  # needs to be extended in specific implementation
 
         # greenhouse dimensions, typical ratio if 3:1
-        self.width = 10  # meters
-        self.length = 30  # meters
-        self.height = 4
+        self.width: int = 10  # meters
+        self.length: int = 30  # meters
+        self.height: int = 4
 
         # state variables
-        self.observation_space = gym.spaces.Discrete(6)
-        self.time = 0  # hour of the day
-        self.outside_temp = self.get_outside_temp()  # outside temp for each hour of the day
-        self.solar_radiation = self.get_radiative_heat()
-        self.inside_temp = 22
-        self.ideal_temp = 22
-        self.temp_tolerance = 1
+        self.observation_space: gym.spaces = gym.spaces.Discrete(6)
+        self.time: int = 0  # hour of the day
+        self.outside_temp: ArrayLike = self.get_outside_temp()  # outside temp for each hour of the day
+        self.solar_radiation: ArrayLike = self.get_radiative_heat()
+        self.inside_temp: int = 22
+        self.ideal_temp: int = 22
+        self.temp_tolerance: int = 1
 
         # histories
-        self.temp_history = []  # internal temp history for episode
-        self.reward_history = []  # reward history for episode
-        self.action_history = []  # action history for episode
-        self.temp_change_history = []  # env temp change history for episode
-        self.rad_temp_change_history = []  # radiative component of env temp change history for episode
+        self.temp_history: list = []  # internal temp history for episode
+        self.reward_history: list = []  # reward history for episode
+        self.action_history: list = []  # action history for episode
+        self.temp_change_history: list = []  # env temp change history for episode
+        self.rad_temp_change_history: list = []  # radiative component of env temp change history for episode
 
     def get_action_space(self):
-        """Defines a discrete or continuous action space"""
+        """Extend to define a discrete or continuous action space"""
 
         raise NotImplementedError("Define an action space!")
 
-        None
+        pass
 
     def get_action_map(self):
-        """returns a fucntion that maps """
+        """returns a function that maps from agent action to env action-space"""
 
         raise NotImplementedError("Define an action map!")
 
-        None
+        pass
 
     def step(self, action):
         """
@@ -136,8 +138,9 @@ class GreenhouseBaseEnv(gym.Env):
             temps = np.concatenate((temps, np.array([22])))
         else:
             # temps = np.full(24, np.random.randint(17, 22))
-            temps = np.full(25, 25)  # len() = 25 because need post ternimal info for last sarSa
-        return temps
+            temps = np.full(25, 25, dtype=int)  # len() = 25 because need post ternimal info for last sarSa
+        # return temps
+        return 0
 
     def get_reward(self, action):
         # TODO: IMPLEMENT CLIFFING REWARD FUNCTION
