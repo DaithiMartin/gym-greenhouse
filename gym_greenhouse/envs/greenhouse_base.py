@@ -138,9 +138,8 @@ class GreenhouseBaseEnv(gym.Env):
             temps = np.concatenate((temps, np.array([22])))
         else:
             # temps = np.full(24, np.random.randint(17, 22))
-            temps = np.full(25, 25, dtype=int)  # len() = 25 because need post ternimal info for last sarSa
-        # return temps
-        return 0
+            temps = np.full(25, 25, dtype=int)  # len() = 25 because need post terminal info for last sarSa
+        return temps
 
     def get_reward(self, action):
         # TODO: IMPLEMENT CLIFFING REWARD FUNCTION
@@ -167,13 +166,13 @@ class GreenhouseBaseEnv(gym.Env):
         inside_temp = self.inside_temp
         ideal_temp = self.ideal_temp
         radiation = self.solar_radiation[time]
-        in_tolarance = 1 if ideal_temp - self.temp_tolerance <= inside_temp <= ideal_temp + self.temp_tolerance else 0
+        in_tolerance = 1 if ideal_temp - self.temp_tolerance <= inside_temp <= ideal_temp + self.temp_tolerance else 0
         state = [time,
                  outside_temp,
                  inside_temp,
                  ideal_temp - inside_temp,
                  radiation,
-                 in_tolarance
+                 in_tolerance
                  ]
 
         return np.array(state)
@@ -192,7 +191,9 @@ class GreenhouseBaseEnv(gym.Env):
         self.time += 1
 
         # collect state
-        nominal = 1 if self.inside_temp + self.temp_tolerance >= self.inside_temp >= self.inside_temp - self.temp_tolerance else 0
+        high_tolerance = self.inside_temp + self.temp_tolerance
+        low_tolerance = self.inside_temp - self.temp_tolerance
+        nominal = 1 if high_tolerance >= self.inside_temp >= low_tolerance else 0
         state = [self.time,
                  self.outside_temp[self.time],
                  self.inside_temp,
@@ -254,7 +255,7 @@ class GreenhouseBaseEnv(gym.Env):
 
         all units: W m^-2
         """
-        # TODO: convert (W m^-2) to (J hr^-1 m^-2) ** should be corrected start by running unit tests
+        # TODO: convert (W m^-2) to (J hr^-1 m^-2) ** this should be corrected but start by running unit tests
         # Q_heater
         num_heaters = self.num_heaters
         ground_surface = self.width * self.height
