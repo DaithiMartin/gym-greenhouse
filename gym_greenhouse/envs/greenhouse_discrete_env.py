@@ -48,16 +48,14 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
 
         Returns: function that calls the actin dict.
         """
-
         # TODO: SHOW FACTORY TO GEORGE
-
         def action_map(action):
             return self.action_dict[action]
 
         return action_map
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     env = GreenhouseDiscreteEnv()
     print(f"Action Space: {env.action_space}")
     print(f"Observation Space: {env.observation_space}")
@@ -78,7 +76,9 @@ if __name__ == '__main__':
     # TODO: REPLACE WITH REPORT FUNCTION IN BASE CLASS
     print(f"temp history: {env.temp_history}, Length: {len(env.temp_history)}")
     print(f"reward history: {env.reward_history}, Length: {len(env.reward_history)}")
-    print(f"temp change history: {env.temp_change_history}, Length: {len(env.temp_change_history)}")
+    print(
+        f"temp change history: {env.temp_change_history}, Length: {len(env.temp_change_history)}"
+    )
     print(f"Action history: {env.action_history}")
     print(f"rad temp change history: {env.rad_temp_change_history}")
 

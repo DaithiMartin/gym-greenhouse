@@ -1,11 +1,14 @@
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union, Callable
+from typing import Union, Callable, Any, List, TypeVar, Generic
 from numpy.typing import ArrayLike
 
 
-class GreenhouseBaseEnv(gym.Env):
+T = TypeVar("T")
+
+
+class GreenhouseBaseEnv(gym.Env, Generic[T]):
     """
     This is a Base Class for the Greenhouse Gym Environments.
 
@@ -43,7 +46,7 @@ class GreenhouseBaseEnv(gym.Env):
         self.action_min: float = -1e3  # Watts
         self.action_space: gym.spaces = self.get_action_space()  # needs to be extended in specific implementation
 
-        # FIXME: ASK GEORGE HOW TO ANNOTATE
+        # FIXME: make both callables
         self.action_map: Union[dict, Callable] = self.get_action_map()  # needs to be extended in specific implementation
 
         # greenhouse dimensions, typical ratio if 3:1
@@ -61,9 +64,9 @@ class GreenhouseBaseEnv(gym.Env):
         self.temp_tolerance: int = 1
 
         # histories
-        self.temp_history: list = []  # internal temp history for episode
-        self.reward_history: list = []  # reward history for episode
-        self.action_history: list = []  # action history for episode
+        self.temp_history: List[float] = []  # internal temp history for episode
+        self.reward_history: List[float] = []  # reward history for episode
+        self.action_history: List[T] = []  # action history for episode
         self.temp_change_history: list = []  # env temp change history for episode
         self.rad_temp_change_history: list = []  # radiative component of env temp change history for episode
 

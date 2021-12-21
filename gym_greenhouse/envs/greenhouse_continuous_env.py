@@ -1,10 +1,10 @@
-
+from typing import TypeVar
 import gym
 import numpy as np
 from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
 
 
-class GreenhouseContinuousEnv(GreenhouseBaseEnv):
+class GreenhouseContinuousEnv(GreenhouseBaseEnv[float]):
     def __init__(self):
         super(GreenhouseContinuousEnv, self).__init__()
         self.action_space = self.get_action_space()
@@ -51,3 +51,4 @@ if __name__ == '__main__':
     print(f"rad temp change history: {env.rad_temp_change_history}")
 
     env.render()
+    

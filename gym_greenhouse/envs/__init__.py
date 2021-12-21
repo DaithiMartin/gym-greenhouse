@@ -1,3 +1,3 @@
-from gym_greenhouse.envs.greenhouse_discrete_env import GreenhouseDiscreteEnv
 from gym_greenhouse.envs.greenhouse_continuous_env import GreenhouseContinuousEnv
+from gym_greenhouse.envs.greenhouse_discrete_env import GreenhouseDiscreteEnv
 from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
