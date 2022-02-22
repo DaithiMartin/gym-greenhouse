@@ -22,6 +22,7 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
 
         Returns: gym.spaces object for discrete action space
         """
+
         num_actions = 21
         action_space = gym.spaces.Discrete(num_actions)
 
