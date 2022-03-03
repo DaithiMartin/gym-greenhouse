@@ -44,7 +44,7 @@ if __name__ == '__main__':
             print("Episode finished after {} time-steps".format(t + 1))
             break
 
-    print(f"temp history: {env.temp_history}, Length: {len(env.temp_history)}")
+    print(f"temp history: {env.final_temp_history}, Length: {len(env.final_temp_history)}")
     print(f"reward history: {env.reward_history}, Length: {len(env.reward_history)}")
     print(f"temp change history: {env.temp_change_history}, Length: {len(env.temp_change_history)}")
     print(f"Action history: {env.action_history}")

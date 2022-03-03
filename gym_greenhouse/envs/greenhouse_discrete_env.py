@@ -1,8 +1,16 @@
 """Discrete greenhouse environment"""
 from typing import Callable, Any
 import gym
+import numpy as np
 from numpy import linspace
 from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
+
+# Hyper parameters
+# -------------------------------------------------------------------------------#
+NUM_ACTIONS = 31
+
+
+# -------------------------------------------------------------------------------#
 
 
 class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
@@ -23,8 +31,7 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
         Returns: gym.spaces object for discrete action space
         """
 
-        num_actions = 21
-        action_space = gym.spaces.Discrete(num_actions)
+        action_space = gym.spaces.Discrete(NUM_ACTIONS)
 
         return action_space
 
@@ -49,6 +56,7 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
 
         Returns: function that calls the actin dict.
         """
+
         # TODO: SHOW FACTORY TO GEORGE
         def action_map(action):
             return self.action_dict[action]
@@ -64,23 +72,18 @@ if __name__ == "__main__":
     observation = env.reset()
     print(f"Initial Observation: {observation}")
     # actions = [9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7, 9, 10, 10, 10, 10, 8, 7, 7, 5]
+    # actions = np.zeros(24, dtype=int).tolist()  # apply cooling the whole time, to test if action space is large enough
+    # wat_action = env.action_map(0)
     for t in range(50):
         # action = env.action_space.sample()    # random action
         agent_action = env.action_space.n // 2  # take no action
-        # action = actions[t]                   # specific trajectory
+        # agent_action = actions[t]  # specific trajectory
         observation, reward, done, info = env.step(agent_action)
-        print(f"Observation {t + 1}: {observation}")
+        # print(f"Observation {t + 1}: {observation}")
         if done:
             print(f"Episode finished after {t + 1} time-steps")
             break
 
-    # TODO: REPLACE WITH REPORT FUNCTION IN BASE CLASS
-    print(f"temp history: {env.temp_history}, Length: {len(env.temp_history)}")
-    print(f"reward history: {env.reward_history}, Length: {len(env.reward_history)}")
-    print(
-        f"temp change history: {env.temp_change_history}, Length: {len(env.temp_change_history)}"
-    )
-    print(f"Action history: {env.action_history}")
-    print(f"rad temp change history: {env.rad_temp_change_history}")
-
     env.render()
+
+    print("complete")

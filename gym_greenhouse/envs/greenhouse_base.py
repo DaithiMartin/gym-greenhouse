@@ -1,11 +1,32 @@
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 from typing import Union, Callable, Any, List, TypeVar, Generic
 from numpy.typing import ArrayLike
+from scipy.integrate import solve_ivp
+
+# Hyper parameters
+# -------------------------------------------------------------------------------#
+# Environment Type
+ACTION_MAX: float = 1e5    # watts
+ACTION_MIN: float = -1e5   # watts
+DIURNAL_SWING: bool = True
+
+# Greenhouse simulation
+SPECIFIC_HEAT: float = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
+AIR_DENSITY: float = 1.225  # kg / m^3
+
+# -------------------------------------------------------------------------------#
 
 
+# Typer parameters
+# -------------------------------------------------------------------------------#
 T = TypeVar("T")
+
+# -------------------------------------------------------------------------------#
+
+
 
 
 class GreenhouseBaseEnv(gym.Env, Generic[T]):
@@ -34,7 +55,8 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         super(GreenhouseBaseEnv, self).__init__()
 
         # versions
-        self.diurnal_swing: bool = True
+
+        self.diurnal_swing: bool = DIURNAL_SWING
 
         # simulation fields
         self.d_t: int = 1  # hours
@@ -42,33 +64,49 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         # cooling and heating with discrete steps
         # NOTE: action space needs to be calibrated to new physics
         self.num_heaters: int = 1
-        self.action_max: float = 1e3  # Watts
-        self.action_min: float = -1e3  # Watts
-        self.action_space: gym.spaces = self.get_action_space()  # needs to be extended in specific implementation
+        self.action_max: float = ACTION_MAX  # Watts
+        self.action_min: float = ACTION_MIN  # Watts
+        self.action_space: gym.spaces = self.get_action_space()  # needs to be extended
 
         # FIXME: make both callables
-        self.action_map: Union[dict, Callable] = self.get_action_map()  # needs to be extended in specific implementation
+        self.action_map: Union[dict, Callable] = self.get_action_map()  # needs to be extended
 
         # greenhouse dimensions, typical ratio if 3:1
         self.width: int = 10  # meters
         self.length: int = 30  # meters
-        self.height: int = 4
+        self.height: float = 6.3  # meters
 
         # state variables
         self.observation_space: gym.spaces = gym.spaces.Discrete(6)
         self.time: int = 0  # hour of the day
         self.outside_temp: ArrayLike = self.get_outside_temp()  # outside temp for each hour of the day
         self.solar_radiation: ArrayLike = self.get_radiative_heat()
+        self.outside_rh_humid: ArrayLike = self.get_outside_rh()
         self.inside_temp: int = 22
         self.ideal_temp: int = 22
         self.temp_tolerance: int = 1
+        self.inside_abs_humid: int = self.get_abs_humid(self.inside_temp, 0.2)
 
         # histories
-        self.temp_history: List[float] = []  # internal temp history for episode
+        self.final_temp_history: List[float] = []  # internal temp history for episode
         self.reward_history: List[float] = []  # reward history for episode
         self.action_history: List[T] = []  # action history for episode
         self.temp_change_history: list = []  # env temp change history for episode
         self.rad_temp_change_history: list = []  # radiative component of env temp change history for episode
+        self.start_temp_hist: list = []
+        self.initial_humid_history: list = []
+        self.final_humid_history: list = []
+
+        # dataframe formatted report
+        self.episode_df = None
+
+        self.q_heat_hist = []
+        self.q_grin_hist = []
+        self.q_latent_hist = []
+        self.q_sensible_hist = []
+        self.q_glazing_hist = []
+        self.solver_temp = 22
+        self.fin_temp_hist = []
 
     def get_action_space(self):
         """Extend to define a discrete or continuous action space"""
@@ -104,12 +142,13 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         return state
 
-    def render(self, mode='human', report=False):
+    def render(self, mode='human', report=True):
         """Display episode visualization."""
+        # TODO: ADD HUMIDITY PLOT
         # internal vs external temperature
         x = np.arange(24)
-        temp_external = self.outside_temp[:-1]  # exclude last time becuase thats hour 25
-        temp_internal = self.temp_history
+        temp_external = self.outside_temp[:-1]  # exclude last time because that's hour 25
+        temp_internal = self.final_temp_history
         temp_ideal = np.full(24, self.ideal_temp)
         plt.plot(x, temp_external, label="External")
         plt.plot(x, temp_internal, 'o-', label="Internal")
@@ -120,12 +159,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         plt.legend()
         plt.show()
         if report:
-            print(f"Actions")
-            print(self.action_history)
-            print(f"Rewards")
-            print(self.reward_history)
-            print(f"Temps")
-            print(self.temp_history)
+            self.episode_df = self.report()
 
         return None
 
@@ -141,8 +175,14 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
             temps = np.concatenate((temps, np.array([22])))
         else:
             # temps = np.full(24, np.random.randint(17, 22))
-            temps = np.full(25, 25, dtype=int)  # len() = 25 because need post terminal info for last sarSa
+            temps = np.full(25, 26, dtype=int)  # len() = 25 because need post terminal info for last sarSa
         return temps
+
+    @staticmethod
+    def get_outside_rh():
+
+        rel_humid = np.full(25, 0.2)
+        return rel_humid
 
     def get_reward(self, action):
         # TODO: IMPLEMENT CLIFFING REWARD FUNCTION
@@ -162,7 +202,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return reward
 
     def get_state(self):
-        """Returns observation tuple"""
+        """Returns observation tuple of current state."""
 
         time = self.time
         outside_temp = self.outside_temp[time]
@@ -181,13 +221,21 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return np.array(state)
 
     def update_state(self, action):
+        """Updates internal state"""
+        # log initial temperature
+        self.start_temp_hist.append(self.inside_temp)
+        self.initial_humid_history.append(self.inside_abs_humid)
 
         # agent takes action and environment reacts
-        self.update_inside_temp(action)
-        self.update_humidity(action)
+        new_temp, new_humid = self.get_temp_humid(action)
+
+        # update instance state
+        self.inside_temp = new_temp
+        self.inside_abs_humid = new_humid
 
         # update histories
-        self.temp_history.append(self.inside_temp)
+        self.final_temp_history.append(self.inside_temp)
+        self.final_humid_history.append(self.inside_abs_humid)
         self.action_history.append(self.action_map(action))
 
         # increment time
@@ -207,12 +255,11 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return np.array(state)
 
     def update_conductive_flow(self):
+        """DEPRECIATED"""
 
-        specific_heat = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
         air_volume = self.height * self.width * self.length  # m^3
 
-        air_density = 1.225  # kg / m^3
-        mass = air_volume * air_density  # kg
+        mass = air_volume * AIR_DENSITY  # kg
 
         # heat loss components
         area = 2 * self.width * self.height + 2 * self.length * self.height + self.width * self.height
@@ -229,7 +276,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         dQ = dQ * 60 * 60  # jules lost to environment
 
         # calc new green house temp after heat loss
-        temp_change = (1 / specific_heat) * dQ / mass
+        temp_change = (1 / SPECIFIC_HEAT) * dQ / mass
 
         new_temp = T_inside + temp_change
 
@@ -250,20 +297,82 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         return Q_GRout
 
-    def update_inside_temp(self, action):
-        """
-        Energy Mass Balance for internal heat.
+    @staticmethod
+    def get_abs_humid(inside_temp, rel_humid):
 
+        abs_humid = (6.112 * np.exp((17.67 * inside_temp) / (inside_temp + 243.5)) * rel_humid * 2.1674)
+        abs_humid = abs_humid / (273.15 + inside_temp)
+
+        return abs_humid
+
+    def get_q_heater(self,
+                     action: tuple):
+
+        ground_surface = self. width * self.length
+        heater_capacity = self.action_map(action)
+        Q_heater = self.num_heaters * heater_capacity / ground_surface
+
+        return Q_heater
+
+    def energy_bal(self, t, T_in, *args):
+        """RHS of temperature energy balance equation"""
+
+        # constant parameters
+        Cp = 1010  # specific heat of moist air (J kg^-1 K^-1)
+        rho = 1.2  # specific mass of air  (kg dry air m^-3)
+        H = self.height  # Note that the paper calls for avg height but does not describe how that is calculated(m)
+        L = 2.5e6  # latent heat of vaporization (J kg^-1)
+        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
+        # TODO: DETERMINE HOW TO MAKE THIS DYNAMIC WITH DIFFERENT GH ARCHITECTURE
+        w = 2.1     # ration of glazing to floor area
+        k = 6.2  # heat transfer coefficient (W m^-2 C^-1)
+
+        # non constant parameters
+        Q_GRin = args[0]
+        Q_Heat = args[1]
+        E = args[2]
+        T_out = args[3]
+
+        # components
+        Q_latent = L * E
+        Q_sensible = qv * Cp * rho * (T_in - T_out)
+        Q_glaze = k * w * (T_in - T_out)
+
+        d_Temp = 1 / (Cp * rho * H) * (Q_GRin + Q_Heat - Q_latent - Q_sensible - Q_glaze)
+
+        return d_Temp
+
+    def water_balance(self, t, W_in, *args):
+        """RHS of humidity mass balance equation"""
+
+        # constant parameters
+        H = self.height  # Note that the paper calls for avg height but does not describe how that is calculated(m)
+        rho = 1.2  # specific mass of air  (kg dry air m^-3)
+        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
+
+        # non-constant parameters
+        E = args[0]
+        W_out = args[1]
+
+        d_W = 1 / (H * rho) * (E - (W_in - W_out) * qv * rho)
+
+        return d_W
+
+    def get_temp_humid(self, action):
+        """
+        Energy and Mass Balance for internal heat and humidity.
+
+        Heat, all units: W m^-2
         Q_GRin + Q_heater = Q_IV + Q_glazing
 
-        all units: W m^-2
+        Water, absolute humidity in kg water kg^-1 dry air
+        W_in * q_v * rho = W_out * q_v * rho + E
+
+        **note 1 W == J s^-1
         """
-        # TODO: convert (W m^-2) to (J hr^-1 m^-2) ** this should be corrected but start by running unit tests
+
         # Q_heater
-        num_heaters = self.num_heaters
-        ground_surface = self.width * self.height
-        heater_capacity = self.action_map(action)
-        Q_heater = num_heaters * heater_capacity / ground_surface
+        Q_heater = self.get_q_heater(action)
 
         # Q_GRin
         tau_c = 0.9  # solar radiation transmittance of glazing material (dimensionless)
@@ -271,49 +380,42 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         Q_GRout = self.solar_radiation[self.time]  # global outside radiation (W m^-2)
         Q_GRin = tau_c * (1 - rho_g) * Q_GRout
 
-        # Q_IV
-        # latent heat loss
-        L = 2.5e6  # latent heat of vaporization (J kg^-1)
+        # latent heat
+        # energy consumed in the phase transition of water, in this simulation: evapotranspiration
         E = (3e-4 * tau_c * Q_GRin + 0.0021) / 15 / 60  # evapotranspiration rate (kg m^-2 15min^-1) /15min /60 sec
-        E = 0
+        # E = 0  # no plants
 
-        # sensible heat loss
-        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
-        Cp = 1010  # specific heat of moist air (J kg^-1 K^-1)
-        rho = 1.2  # specific mass of air  (kg dry air m^-3)
-        T_in = self.inside_temp
+        # ode time period, 60 sec min^-1 * 60 min hr^-1
+        t_span = (0, 60 * 60)
+
+        # energy ode solver
         T_out = self.outside_temp[self.time]
-        latent_loss = L * E
-        sensible_loss = qv * Cp * rho * (T_in - T_out)
-        Q_IV = latent_loss + sensible_loss
+        energy_args = (Q_GRin, Q_heater, E, T_out)
+        energy_sol = solve_ivp(self.energy_bal, t_span, [self.inside_temp], args=energy_args)
+        new_temp = energy_sol.y[:, -1].item()
 
-        # Q_glazing
-        w = 2.2  # ratio of glazing surfaces to ground surface (dimensionless)
-        k = 6.2  # heat transfer coefficient (W m^-2 C^-1)
-        Q_glazing = k * w * (T_in - T_out)
+        # humidity ode solver
+        rh_out = self.outside_rh_humid[self.time]
+        w_abs_out = self.get_abs_humid(self.inside_temp, rh_out)
+        humid_args = (E, w_abs_out)
+        humid_sol = solve_ivp(self.water_balance, t_span, [self.inside_abs_humid], args=humid_args)
+        new_humid = humid_sol.y[:, -1].item()
 
-        # first order Euler estimation
-        H = 6.3  # average greenhouse height (m)
+        return new_temp, new_humid
 
-        d_Temp = 1 / (Cp * rho * H) * (Q_GRin + Q_heater - Q_IV - Q_glazing)  # deg C s^-1
-        # d_Temp = 1 / (Cp * rho * H) * (Q_GRin + Q_heater - Q_glazing)
-
-        d_Temp = d_Temp * 60  # deg C hr^-1
-
-        self.inside_temp = self.inside_temp + d_Temp * self.d_t
-
-        # add temp change to history
-        self.temp_change_history.append(d_Temp)
-
-        return None
-
-    def update_humidity(self, action):
-        pass
-
-    def report(self):
-        # TODO: COMPLETE ME WITH HISTORY REPORT
+    def report(self) -> pd.DataFrame:
+        # TODO: REPRESENT HUMIDITY AS RH AND INCLUDE OUTSIDE RH
+        # TODO: FIGURE OUT HOW INCLUDE ACTIONS IN REPORT
         """probably use a pandas dataframe for display"""
-        pass
+        d = {"Outside Temp": self.outside_temp[:-1],
+             "Initial Temp": self.start_temp_hist,
+             "Final Temp": self.final_temp_history,
+             "Initial Inside AH": self.initial_humid_history,
+             "Final Inside AH": self.final_humid_history,
+             }
+
+        df = pd.DataFrame(d)
+        return df
 
 
 if __name__ == '__main__':
