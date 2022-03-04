@@ -9,8 +9,8 @@ from scipy.integrate import solve_ivp
 # Hyper parameters
 # -------------------------------------------------------------------------------#
 # Environment Type
-ACTION_MAX: float = 1e5    # watts
-ACTION_MIN: float = -1e5   # watts
+ACTION_MAX: float = 1e5  # watts
+ACTION_MIN: float = -1e5  # watts
 DIURNAL_SWING: bool = True
 
 # Greenhouse simulation
@@ -24,9 +24,8 @@ AIR_DENSITY: float = 1.225  # kg / m^3
 # -------------------------------------------------------------------------------#
 T = TypeVar("T")
 
+
 # -------------------------------------------------------------------------------#
-
-
 
 
 class GreenhouseBaseEnv(gym.Env, Generic[T]):
@@ -55,7 +54,6 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         super(GreenhouseBaseEnv, self).__init__()
 
         # versions
-
         self.diurnal_swing: bool = DIURNAL_SWING
 
         # simulation fields
@@ -79,13 +77,15 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         # state variables
         self.observation_space: gym.spaces = gym.spaces.Discrete(6)
         self.time: int = 0  # hour of the day
-        self.outside_temp: ArrayLike = self.get_outside_temp()  # outside temp for each hour of the day
-        self.solar_radiation: ArrayLike = self.get_radiative_heat()
-        self.outside_rh_humid: ArrayLike = self.get_outside_rh()
-        self.inside_temp: int = 22
-        self.ideal_temp: int = 22
-        self.temp_tolerance: int = 1
-        self.inside_abs_humid: int = self.get_abs_humid(self.inside_temp, 0.2)
+        self.outside_temp: ArrayLike = self.set_outside_temp()  # set outside temp for episode
+        self.solar_radiation: ArrayLike = self.set_radiative_heat()     # set radiative radiation for episode
+        self.inside_temp: int = 22      # starting inside temp
+        self.ideal_temp: int = 22       # ideal inside temp
+        self.temp_tolerance: int = 1    # +/- tolerance for ideal temp
+        self.outside_rh_humid: ArrayLike = self.set_outside_rh()    # set relative humidity for episode
+        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, 0.2)   # initial inside temp
+        self.ideal_rel_humid: float = 0.1   # ideal relative humidity
+        self.humid_tolerance: float = 0.05  # +/- tolerance for ideal humidity
 
         # histories
         self.final_temp_history: List[float] = []  # internal temp history for episode
@@ -94,19 +94,11 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.temp_change_history: list = []  # env temp change history for episode
         self.rad_temp_change_history: list = []  # radiative component of env temp change history for episode
         self.start_temp_hist: list = []
-        self.initial_humid_history: list = []
-        self.final_humid_history: list = []
+        self.initial_rel_humid_history: list = []
+        self.final_rel_humid_history: list = []
 
         # dataframe formatted report
-        self.episode_df = None
-
-        self.q_heat_hist = []
-        self.q_grin_hist = []
-        self.q_latent_hist = []
-        self.q_sensible_hist = []
-        self.q_glazing_hist = []
-        self.solver_temp = 22
-        self.fin_temp_hist = []
+        self.episode_report = None
 
     def get_action_space(self):
         """Extend to define a discrete or continuous action space"""
@@ -142,9 +134,12 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         return state
 
-    def render(self, mode='human', report=True):
+    def render(self,
+               mode: str = 'human',
+               report: bool = True):
+
         """Display episode visualization."""
-        # TODO: ADD HUMIDITY PLOT
+
         # internal vs external temperature
         x = np.arange(24)
         temp_external = self.outside_temp[:-1]  # exclude last time because that's hour 25
@@ -154,19 +149,35 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         plt.plot(x, temp_internal, 'o-', label="Internal")
         plt.fill_between(x, temp_ideal + self.temp_tolerance, temp_ideal - self.temp_tolerance,
                          label="Ideal", alpha=0.3, color='g')
+        plt.title("Temperature")
         plt.xlabel("Time")
-        plt.ylabel("Temperature")
+        plt.ylabel("Degree C")
         plt.legend()
         plt.show()
+
+        # internal humidity vs external humidity
+        humid_external = self.outside_rh_humid[:-1]
+        humid_internal = self.final_rel_humid_history
+        humid_ideal = np.full(24, self.ideal_rel_humid)
+        plt.plot(x, humid_external, label="External")
+        plt.plot(x, humid_internal, 'o-', label="Internal")
+        plt.fill_between(x, humid_ideal + self.humid_tolerance, humid_ideal - self.humid_tolerance,
+                         label="Ideal", alpha=0.3, color='y')
+        plt.title("Humidity")
+        plt.xlabel("Time")
+        plt.ylabel("Relative Humidity")
+        plt.legend()
+        plt.show()
+
         if report:
-            self.episode_df = self.report()
+            self.episode_report = self.report()
 
         return None
 
     def close(self):
         pass
 
-    def get_outside_temp(self):
+    def set_outside_temp(self):
 
         if self.diurnal_swing:
             base = np.arange(6)
@@ -179,7 +190,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return temps
 
     @staticmethod
-    def get_outside_rh():
+    def set_outside_rh():
 
         rel_humid = np.full(25, 0.2)
         return rel_humid
@@ -224,7 +235,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         """Updates internal state"""
         # log initial temperature
         self.start_temp_hist.append(self.inside_temp)
-        self.initial_humid_history.append(self.inside_abs_humid)
+        self.initial_rel_humid_history.append(self.map_abs_to_rel_humid(self.inside_temp, self.inside_abs_humid))
 
         # agent takes action and environment reacts
         new_temp, new_humid = self.get_temp_humid(action)
@@ -235,7 +246,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         # update histories
         self.final_temp_history.append(self.inside_temp)
-        self.final_humid_history.append(self.inside_abs_humid)
+        self.final_rel_humid_history.append(self.map_abs_to_rel_humid(self.inside_temp, self.inside_abs_humid))
         self.action_history.append(self.action_map(action))
 
         # increment time
@@ -285,7 +296,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return temp_change
 
     @staticmethod
-    def get_radiative_heat():
+    def set_radiative_heat():
 
         # peak Q_GRout
         max_Q_GRout = 1025  # W m^-2
@@ -298,17 +309,25 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return Q_GRout
 
     @staticmethod
-    def get_abs_humid(inside_temp, rel_humid):
-
-        abs_humid = (6.112 * np.exp((17.67 * inside_temp) / (inside_temp + 243.5)) * rel_humid * 2.1674)
-        abs_humid = abs_humid / (273.15 + inside_temp)
+    def map_rel_to_abs_humid(temp, rel_humid):
+        """Maps relative humidity -> absolute humidity"""
+        abs_humid = (6.112 * np.exp((17.67 * temp) / (temp + 243.5)) * rel_humid * 2.1674)
+        abs_humid = abs_humid / (273.15 + temp)
 
         return abs_humid
+
+    @staticmethod
+    def map_abs_to_rel_humid(temp, abs_humid):
+        """Masp absolute humidity -> relative humidity"""
+        rel_humid = abs_humid * (273.15 + temp)
+        rel_humid = rel_humid / (6.112 * np.exp((17.67 * temp) / (temp + 243.5)) * 2.1674)
+
+        return rel_humid
 
     def get_q_heater(self,
                      action: tuple):
 
-        ground_surface = self. width * self.length
+        ground_surface = self.width * self.length
         heater_capacity = self.action_map(action)
         Q_heater = self.num_heaters * heater_capacity / ground_surface
 
@@ -324,7 +343,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         L = 2.5e6  # latent heat of vaporization (J kg^-1)
         qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
         # TODO: DETERMINE HOW TO MAKE THIS DYNAMIC WITH DIFFERENT GH ARCHITECTURE
-        w = 2.1     # ration of glazing to floor area
+        w = 2.1  # ration of glazing to floor area
         k = 6.2  # heat transfer coefficient (W m^-2 C^-1)
 
         # non constant parameters
@@ -396,7 +415,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         # humidity ode solver
         rh_out = self.outside_rh_humid[self.time]
-        w_abs_out = self.get_abs_humid(self.inside_temp, rh_out)
+        w_abs_out = self.map_rel_to_abs_humid(self.inside_temp, rh_out)
         humid_args = (E, w_abs_out)
         humid_sol = solve_ivp(self.water_balance, t_span, [self.inside_abs_humid], args=humid_args)
         new_humid = humid_sol.y[:, -1].item()
@@ -404,14 +423,13 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return new_temp, new_humid
 
     def report(self) -> pd.DataFrame:
-        # TODO: REPRESENT HUMIDITY AS RH AND INCLUDE OUTSIDE RH
         # TODO: FIGURE OUT HOW INCLUDE ACTIONS IN REPORT
         """probably use a pandas dataframe for display"""
         d = {"Outside Temp": self.outside_temp[:-1],
              "Initial Temp": self.start_temp_hist,
              "Final Temp": self.final_temp_history,
-             "Initial Inside AH": self.initial_humid_history,
-             "Final Inside AH": self.final_humid_history,
+             "Initial Inside RH": self.initial_rel_humid_history,
+             "Final Inside RH": self.final_rel_humid_history,
              }
 
         df = pd.DataFrame(d)
