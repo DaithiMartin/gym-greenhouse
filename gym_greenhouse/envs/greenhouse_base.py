@@ -9,8 +9,8 @@ from scipy.integrate import solve_ivp
 # Hyper parameters
 # -------------------------------------------------------------------------------#
 # Environment Type
-ACTION_MAX: float = 1e5  # watts
-ACTION_MIN: float = -1e5  # watts
+ACTION_MAX: float = 1e4  # watts
+ACTION_MIN: float = -1e4  # watts
 DIURNAL_SWING: bool = True
 
 # Greenhouse simulation

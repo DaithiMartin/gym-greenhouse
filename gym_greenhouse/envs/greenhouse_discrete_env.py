@@ -57,7 +57,6 @@ class GreenhouseDiscreteEnv(GreenhouseBaseEnv):
         Returns: function that calls the actin dict.
         """
 
-        # TODO: SHOW FACTORY TO GEORGE
         def action_map(action):
             return self.action_dict[action]
 
