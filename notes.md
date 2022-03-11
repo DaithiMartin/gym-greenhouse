@@ -37,3 +37,14 @@ Meeting with doug today.
 Main goal is to get a plot for ideal humidity vs time.
 Time permitting, the next step is to humidity into the action space. 
 For initial POC this will be actuated directly with a dehumidifier rather than affecting something indirect like ventilation.
+
+Meeting results
+1. train over 1-3 day period
+2. get historical data from weather stations
+~~3. break down ode components for debugging and confirmation that physics is working correctly~~
+
+## 2022.03.07
+
+---
+Added ODE components to self.report().
+

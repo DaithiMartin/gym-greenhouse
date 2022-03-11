@@ -46,6 +46,12 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
     - evapotranspiration for large crop
     - Q_GRout calculated over 12 hour interval
 
+    Underlying Assumptions
+    - no condensation forms on the inside of the glazing surfaces
+    - no evapotranspiration from ground
+    - only source of humidity inside the GH is from evapotranspiration
+    - only loss in humidity is from ventilation
+
     """
     metadata = {'render.modes': ['human']}
 
@@ -84,18 +90,29 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.temp_tolerance: int = 1    # +/- tolerance for ideal temp
         self.outside_rh_humid: ArrayLike = self.set_outside_rh()    # set relative humidity for episode
         self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, 0.2)   # initial inside temp
-        self.ideal_rel_humid: float = 0.1   # ideal relative humidity
-        self.humid_tolerance: float = 0.05  # +/- tolerance for ideal humidity
+        self.ideal_rel_humid: float = 10   # ideal relative humidity in percentage form
+        self.humid_tolerance: float = 5  # +/- tolerance for ideal humidity in percentage form
 
         # histories
-        self.final_temp_history: List[float] = []  # internal temp history for episode
         self.reward_history: List[float] = []  # reward history for episode
         self.action_history: List[T] = []  # action history for episode
-        self.temp_change_history: list = []  # env temp change history for episode
-        self.rad_temp_change_history: list = []  # radiative component of env temp change history for episode
-        self.start_temp_hist: list = []
-        self.initial_rel_humid_history: list = []
-        self.final_rel_humid_history: list = []
+        # self.temp_change_history: list = []  # env temp change history for episode
+        # self.rad_temp_change_history: list = []  # radiative component of env temp change history for episode
+
+        self.start_temp_hist: List[float] = []
+        self.final_temp_history: List[float] = []  # internal temp history for episode
+        self.initial_rel_humid_history: List[float] = []
+        self.final_rel_humid_history: List[float] = []
+
+        # ODE components
+        self.ode_humid_vent_loss = []
+        self.ode_humid_vent_gain = []
+        self.ode_humid_evap_gain = []
+        self.ode_heat_radiation_gain = []
+        self.ode_heat_heater_gain = []
+        self.ode_heat_sensible_loss = []
+        self.ode_heat_latent_loss = []
+        self.ode_heat_conductive_loss = []
 
         # dataframe formatted report
         self.episode_report = None
@@ -114,7 +131,8 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         pass
 
-    def step(self, action):
+    def step(self,
+             action):
         """
         Take a step in the environment.
         """
@@ -191,8 +209,9 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
     @staticmethod
     def set_outside_rh():
+        """RH in percentage form, eg: 20% not 0.20"""
 
-        rel_humid = np.full(25, 0.2)
+        rel_humid = np.full(25, 20)
         return rel_humid
 
     def get_reward(self, action):
@@ -265,36 +284,6 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         return np.array(state)
 
-    def update_conductive_flow(self):
-        """DEPRECIATED"""
-
-        air_volume = self.height * self.width * self.length  # m^3
-
-        mass = air_volume * AIR_DENSITY  # kg
-
-        # heat loss components
-        area = 2 * self.width * self.height + 2 * self.length * self.height + self.width * self.height
-        U = 0.5  # typical 2 layer window value, U = 1/R, will need to be updated
-        T_outside = self.outside_temp[self.time]
-        T_inside = self.inside_temp
-
-        # heat lost by system through conduction
-        dQ = U * area * (T_outside - T_inside)  # watts lost to environment
-        time = self.time
-
-        # convert watts to jules in 1 hour
-        # watt is a jule/sec
-        dQ = dQ * 60 * 60  # jules lost to environment
-
-        # calc new green house temp after heat loss
-        temp_change = (1 / SPECIFIC_HEAT) * dQ / mass
-
-        new_temp = T_inside + temp_change
-
-        self.inside_temp = new_temp
-
-        return temp_change
-
     @staticmethod
     def set_radiative_heat():
 
@@ -310,7 +299,9 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
     @staticmethod
     def map_rel_to_abs_humid(temp, rel_humid):
-        """Maps relative humidity -> absolute humidity"""
+        """Maps relative humidity -> absolute humidity
+        RH in percentage form eg: 20% not 0.20
+        source: https://carnotcycle.wordpress.com/2012/08/04/how-to-convert-relative-humidity-to-absolute-humidity/"""
         abs_humid = (6.112 * np.exp((17.67 * temp) / (temp + 243.5)) * rel_humid * 2.1674)
         abs_humid = abs_humid / (273.15 + temp)
 
@@ -318,7 +309,9 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
     @staticmethod
     def map_abs_to_rel_humid(temp, abs_humid):
-        """Masp absolute humidity -> relative humidity"""
+        """Masp absolute humidity -> relative humidity(non-decimal
+        RH in percentage form eg: 20% not 0.20
+        source: https://carnotcycle.wordpress.com/2012/08/04/how-to-convert-relative-humidity-to-absolute-humidity/"""
         rel_humid = abs_humid * (273.15 + temp)
         rel_humid = rel_humid / (6.112 * np.exp((17.67 * temp) / (temp + 243.5)) * 2.1674)
 
@@ -333,6 +326,44 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         return Q_heater
 
+    @staticmethod
+    def get_latent_sensible_loss(evaporation,
+                                 inside_temp,
+                                 outside_temp):
+
+        L = 2.5e6  # latent heat of vaporization (J kg^-1)
+        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
+        Cp = 1010  # specific heat of moist air (J kg^-1 K^-1)
+        rho = 1.2  # specific mass of air  (kg dry air m^-3)
+
+        latent = L * evaporation
+        sensible = qv * Cp * rho * (inside_temp - outside_temp)
+
+        return latent, sensible
+
+    @ staticmethod
+    def get_conductive_heat_loss(inside_temp,
+                                 outside_temp):
+
+        w = 2.1  # ratio of glazing to floor area
+        k = 6.2  # heat transfer coefficient (W m^-2 C^-1)
+
+        conductive_loss = k * w * (inside_temp - outside_temp)
+
+        return conductive_loss
+
+    @staticmethod
+    def get_humid_vent_bal(inside_humidity,
+                           outside_humidity):
+
+        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
+        rho = 1.2  # specific mass of air  (kg dry air m^-3)
+
+        vent_loss = qv * rho * inside_humidity
+        vent_gain = qv * rho * outside_humidity
+
+        return vent_loss, vent_gain
+
     def energy_bal(self, t, T_in, *args):
         """RHS of temperature energy balance equation"""
 
@@ -343,7 +374,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         L = 2.5e6  # latent heat of vaporization (J kg^-1)
         qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
         # TODO: DETERMINE HOW TO MAKE THIS DYNAMIC WITH DIFFERENT GH ARCHITECTURE
-        w = 2.1  # ration of glazing to floor area
+        w = 2.1  # ratio of glazing to floor area
         k = 6.2  # heat transfer coefficient (W m^-2 C^-1)
 
         # non constant parameters
@@ -387,7 +418,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         Water, absolute humidity in kg water kg^-1 dry air
         W_in * q_v * rho = W_out * q_v * rho + E
 
-        **note 1 W == J s^-1
+        **note 1 W := J s^-1
         """
 
         # Q_heater
@@ -404,21 +435,41 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         E = (3e-4 * tau_c * Q_GRin + 0.0021) / 15 / 60  # evapotranspiration rate (kg m^-2 15min^-1) /15min /60 sec
         # E = 0  # no plants
 
-        # ode time period, 60 sec min^-1 * 60 min hr^-1
-        t_span = (0, 60 * 60)
+        # ODE parameters
+        t_span = (0, 60 * 60)   # ode time period, 60 sec min^-1 * 60 min hr^-1
+        T_out = self.outside_temp[self.time]
+        T_in = self.inside_temp
 
         # energy ode solver
-        T_out = self.outside_temp[self.time]
         energy_args = (Q_GRin, Q_heater, E, T_out)
-        energy_sol = solve_ivp(self.energy_bal, t_span, [self.inside_temp], args=energy_args)
+        energy_sol = solve_ivp(self.energy_bal, t_span, [T_in], args=energy_args)
         new_temp = energy_sol.y[:, -1].item()
+
+        # log heat components
+        self.ode_heat_heater_gain.append(Q_heater)
+        self.ode_heat_radiation_gain.append(Q_GRin)
+        latent_loss, sensible_loss = self.get_latent_sensible_loss(E, new_temp, T_out)
+        self.ode_heat_latent_loss.append(-latent_loss)
+        self.ode_heat_sensible_loss.append(-sensible_loss)
+        conductive_loss = self.get_conductive_heat_loss(new_temp, T_out)
+        self.ode_heat_conductive_loss.append(-conductive_loss)
 
         # humidity ode solver
         rh_out = self.outside_rh_humid[self.time]
         w_abs_out = self.map_rel_to_abs_humid(self.inside_temp, rh_out)
         humid_args = (E, w_abs_out)
-        humid_sol = solve_ivp(self.water_balance, t_span, [self.inside_abs_humid], args=humid_args)
-        new_humid = humid_sol.y[:, -1].item()
+        humid_sol = solve_ivp(self.water_balance, t_span, [T_in], args=humid_args)
+        new_humid = humid_sol.y[:, -1].item()   # absolute humidity
+
+        # log humidity components
+        vent_loss, vent_gain = self.get_humid_vent_bal(new_humid, w_abs_out)
+        self.ode_humid_vent_loss.append(-vent_loss)
+        self.ode_humid_vent_gain.append(vent_gain)
+        self.ode_humid_evap_gain.append(E)
+
+        # checks
+        check_energy = Q_GRin + Q_heater - latent_loss - sensible_loss - conductive_loss
+        check_humid = vent_loss - vent_gain - E
 
         return new_temp, new_humid
 
@@ -430,7 +481,38 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
              "Final Temp": self.final_temp_history,
              "Initial Inside RH": self.initial_rel_humid_history,
              "Final Inside RH": self.final_rel_humid_history,
+             "Global Radiation Gain": self.ode_heat_radiation_gain,
+             "Heater Gain": self.ode_heat_heater_gain,
+             "Sensible Heat Loss": self.ode_heat_sensible_loss,
+             "Latent Heat Loss": self.ode_heat_latent_loss,
+             "Conductive Heat Loss": self.ode_heat_conductive_loss,
+             "Humidity Vent Loss": self.ode_humid_vent_loss,
+             "Humidity Vent Gain": self.ode_humid_vent_gain,
+             "Humidity Evapotranspiration Gain": self.ode_humid_evap_gain,
              }
+
+        # heat component plots
+        x = np.arange(24)
+        plt.plot(x, d["Global Radiation Gain"], label="Global Radiation Gain")
+        plt.plot(x, d["Heater Gain"], label="Heater Gain")
+        plt.plot(x, d["Sensible Heat Loss"], label="Sensible Heat Loss")
+        plt.plot(x, d["Latent Heat Loss"], label="Latent Heat Loss")
+        plt.plot(x, d["Conductive Heat Loss"], label="Conductive Heat Loss")
+        plt.title("Heat ODE Components")
+        plt.xlabel("Time")
+        plt.ylabel("Heat (W m^-2)")
+        plt.legend()
+        plt.show()
+
+        # humidity components
+        plt.plot(x, d["Humidity Vent Loss"], label="Humidity Vent Loss")
+        plt.plot(x, d["Humidity Vent Gain"], label="Humidity Vent Gain")
+        plt.plot(x, d["Humidity Evapotranspiration Gain"], label="Humidity Evapotranspiration Gain")
+        plt.title("Humidity ODE Components")
+        plt.xlabel("Time")
+        plt.ylabel("Absolute Humidity (g water kg^-1 dry air")
+        plt.legend()
+        plt.show()
 
         df = pd.DataFrame(d)
         return df
