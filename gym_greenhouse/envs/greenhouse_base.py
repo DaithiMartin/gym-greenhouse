@@ -89,7 +89,10 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.ideal_temp: int = 22       # ideal inside temp
         self.temp_tolerance: int = 1    # +/- tolerance for ideal temp
         self.outside_rh_humid: ArrayLike = self.set_outside_rh()    # set relative humidity for episode
-        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, 0.2)   # initial inside temp
+
+        self.outside_ah_humid: ArrayLike = self.set_outside_ah()    # FIXME: TESTING
+
+        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, 20)   # initial inside humid
         self.ideal_rel_humid: float = 10   # ideal relative humidity in percentage form
         self.humid_tolerance: float = 5  # +/- tolerance for ideal humidity in percentage form
 
@@ -105,14 +108,15 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.final_rel_humid_history: List[float] = []
 
         # ODE components
-        self.ode_humid_vent_loss = []
-        self.ode_humid_vent_gain = []
-        self.ode_humid_evap_gain = []
         self.ode_heat_radiation_gain = []
         self.ode_heat_heater_gain = []
         self.ode_heat_sensible_loss = []
         self.ode_heat_latent_loss = []
         self.ode_heat_conductive_loss = []
+        self.ode_humid_vent_loss = []
+        self.ode_humid_vent_gain = []
+        self.ode_humid_evap_gain = []
+        self.ode_humid_total = []
 
         # dataframe formatted report
         self.episode_report = None
@@ -213,6 +217,11 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         rel_humid = np.full(25, 20)
         return rel_humid
+
+    @staticmethod
+    def set_outside_ah():
+        abs_humid = np.full(25, 5)
+        return abs_humid
 
     def get_reward(self, action):
         # TODO: IMPLEMENT CLIFFING REWARD FUNCTION
@@ -364,6 +373,17 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         return vent_loss, vent_gain
 
+    @staticmethod
+    def get_new_abs_out(w_in,
+                        evapo_trans):
+        qv = 0.003  # ventilation rate (m^3 m^-2 s^-1)
+        rho = 1.2  # specific mass of air  (kg dry air m^-3)
+
+        d_abs_out = w_in * qv * rho - evapo_trans
+        d_abs_out = d_abs_out / (qv * rho)
+
+        return d_abs_out
+
     def energy_bal(self, t, T_in, *args):
         """RHS of temperature energy balance equation"""
 
@@ -433,7 +453,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         # latent heat
         # energy consumed in the phase transition of water, in this simulation: evapotranspiration
         E = (3e-4 * tau_c * Q_GRin + 0.0021) / 15 / 60  # evapotranspiration rate (kg m^-2 15min^-1) /15min /60 sec
-        # E = 0  # no plants
+        E = 0  # no plants
 
         # ODE parameters
         t_span = (0, 60 * 60)   # ode time period, 60 sec min^-1 * 60 min hr^-1
@@ -455,23 +475,29 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.ode_heat_conductive_loss.append(-conductive_loss)
 
         # humidity ode solver
-        rh_out = self.outside_rh_humid[self.time]
-        w_abs_out = self.map_rel_to_abs_humid(self.inside_temp, rh_out)
+        # rh_out = self.outside_rh_humid[self.time]
+        # w_abs_out = self.map_rel_to_abs_humid(self.inside_temp, rh_out)
+        W_in = self.inside_abs_humid
+        w_abs_out = self.outside_ah_humid[self.time]
         humid_args = (E, w_abs_out)
-        humid_sol = solve_ivp(self.water_balance, t_span, [T_in], args=humid_args)
-        new_humid = humid_sol.y[:, -1].item()   # absolute humidity
+        humid_sol = solve_ivp(self.water_balance, t_span, [W_in], args=humid_args)
+        new_in_humid = humid_sol.y[:, -1].item()   # absolute humidity
+        delta_humid_out = -self.get_new_abs_out(new_in_humid, E) #(new_in_humid - W_in)   # calc gain in absolute humidity to climate
+        self.outside_ah_humid[self.time + 1] = self.outside_ah_humid[self.time + 1] + delta_humid_out   # update outside AH
+
 
         # log humidity components
-        vent_loss, vent_gain = self.get_humid_vent_bal(new_humid, w_abs_out)
+        vent_loss, vent_gain = self.get_humid_vent_bal(new_in_humid, w_abs_out + delta_humid_out)
         self.ode_humid_vent_loss.append(-vent_loss)
         self.ode_humid_vent_gain.append(vent_gain)
         self.ode_humid_evap_gain.append(E)
+        self.ode_humid_total.append(E + vent_gain - vent_loss)
 
         # checks
         check_energy = Q_GRin + Q_heater - latent_loss - sensible_loss - conductive_loss
         check_humid = vent_loss - vent_gain - E
 
-        return new_temp, new_humid
+        return new_temp, new_in_humid
 
     def report(self) -> pd.DataFrame:
         # TODO: FIGURE OUT HOW INCLUDE ACTIONS IN REPORT
@@ -489,6 +515,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
              "Humidity Vent Loss": self.ode_humid_vent_loss,
              "Humidity Vent Gain": self.ode_humid_vent_gain,
              "Humidity Evapotranspiration Gain": self.ode_humid_evap_gain,
+             "Humidity Total": self.ode_humid_total,
              }
 
         # heat component plots
@@ -508,6 +535,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         plt.plot(x, d["Humidity Vent Loss"], label="Humidity Vent Loss")
         plt.plot(x, d["Humidity Vent Gain"], label="Humidity Vent Gain")
         plt.plot(x, d["Humidity Evapotranspiration Gain"], label="Humidity Evapotranspiration Gain")
+        plt.plot(x, d["Humidity Total"], label="Humidity Total")
         plt.title("Humidity ODE Components")
         plt.xlabel("Time")
         plt.ylabel("Absolute Humidity (g water kg^-1 dry air")

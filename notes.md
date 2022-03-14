@@ -48,3 +48,9 @@ Meeting results
 ---
 Added ODE components to self.report().
 
+## 2022.03.11
+
+---
+Investigating the mass balance of humidity. 
+Can't quite figure out why it's not balancing.
+I need to figure out how to update the outside AH to account for what's lost/gained by the greenhouse.
