@@ -11,12 +11,12 @@ from scipy.integrate import solve_ivp
 # Environment Type
 ACTION_MAX: float = 1e4  # watts
 ACTION_MIN: float = -1e4  # watts
-DIURNAL_SWING: bool = True
 
 # Greenhouse simulation
 SPECIFIC_HEAT: float = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
 AIR_DENSITY: float = 1.225  # kg / m^3
 
+SIM_TIME = 3 * 24
 # -------------------------------------------------------------------------------#
 
 
@@ -58,9 +58,6 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
     def __init__(self):
 
         super(GreenhouseBaseEnv, self).__init__()
-
-        # versions
-        self.diurnal_swing: bool = DIURNAL_SWING
 
         # simulation fields
         self.d_t: int = 1  # hours
@@ -144,7 +141,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         state = self.update_state(action)
         reward = self.get_reward(action)
-        done = False if self.time < 24 else True
+        done = False if self.time < SIM_TIME else True
         info = None
 
         return state, reward, done, info
@@ -164,10 +161,10 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         """Display episode visualization."""
 
         # internal vs external temperature
-        x = np.arange(24)
+        x = np.arange(SIM_TIME)
         temp_external = self.outside_temp[:-1]  # exclude last time because that's hour 25
         temp_internal = self.final_temp_history
-        temp_ideal = np.full(24, self.ideal_temp)
+        temp_ideal = np.full(SIM_TIME, self.ideal_temp)
         plt.plot(x, temp_external, label="External")
         plt.plot(x, temp_internal, 'o-', label="Internal")
         plt.fill_between(x, temp_ideal + self.temp_tolerance, temp_ideal - self.temp_tolerance,
@@ -181,7 +178,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         # internal humidity vs external humidity
         humid_external = self.outside_rh_humid[:-1]
         humid_internal = self.final_rel_humid_history
-        humid_ideal = np.full(24, self.ideal_rel_humid)
+        humid_ideal = np.full(SIM_TIME, self.ideal_rel_humid)
         plt.plot(x, humid_external, label="External")
         plt.plot(x, humid_internal, 'o-', label="Internal")
         plt.fill_between(x, humid_ideal + self.humid_tolerance, humid_ideal - self.humid_tolerance,
@@ -192,13 +189,13 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         plt.legend()
         plt.show()
 
-        abs_humid = self.abs_humidity_history
-        plt.plot(x, abs_humid, label="Internal")
-        plt.title("Absolute Humidity")
-        plt.ylabel("Absolute Humidity (g water / kg air)")
-        plt.xlabel("Time")
-        plt.legend()
-        plt.show()
+        # abs_humid = self.abs_humidity_history
+        # plt.plot(x, abs_humid, label="Internal")
+        # plt.title("Absolute Humidity")
+        # plt.ylabel("Absolute Humidity (g water / kg air)")
+        # plt.xlabel("Time")
+        # plt.legend()
+        # plt.show()
 
         if report:
             self.episode_report = self.report()
@@ -210,26 +207,25 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
     def set_outside_temp(self):
 
-        if self.diurnal_swing:
-            base = np.arange(6)
-            base = 1.5 * base
-            temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
-            temps = np.concatenate((temps, np.array([22])))
-        else:
-            # temps = np.full(24, np.random.randint(17, 22))
-            temps = np.full(25, 26, dtype=int)  # len() = 25 because need post terminal info for last sarSa
+
+        base = np.arange(6)
+        base = 1.5 * base
+        temps = np.array((base + 22, 22 + base[::-1], 22 - base, 22 - base[::-1])).flatten()
+        temps = np.concatenate((temps, temps, temps))
+        temps = np.concatenate((temps, np.array([22])))
+
         return temps
 
     @staticmethod
     def set_outside_rh():
         """RH in percentage form, eg: 20% not 0.20"""
 
-        rel_humid = np.full(25, 20)
+        rel_humid = np.full(SIM_TIME + 1, 20)
         return rel_humid
 
     @staticmethod
     def set_outside_ah():
-        abs_humid = np.full(25, 5)
+        abs_humid = np.full(SIM_TIME + 1, 5)
         return abs_humid
 
     def get_reward(self, action):
@@ -310,9 +306,11 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         max_Q_GRout = 1025  # W m^-2
         day_length = 12
         day = np.sin(np.linspace(0, np.pi, day_length)) * max_Q_GRout
-        night = np.zeros(13)
+        night = np.zeros(12)
 
-        Q_GRout = np.concatenate((day, night))
+        full_day = np.concatenate((day, night))
+        Q_GRout = np.concatenate((full_day, full_day, full_day))
+        Q_GRout = np.concatenate((Q_GRout, np.array([0])))
 
         return Q_GRout
 
@@ -493,7 +491,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         humid_sol = solve_ivp(self.water_balance, t_span, [W_in], args=humid_args)
         new_in_humid = humid_sol.y[:, -1].item()   # absolute humidity
         delta_humid_out = -self.get_new_abs_out(new_in_humid, E) #(new_in_humid - W_in)   # calc gain in absolute humidity to climate
-        self.outside_ah_humid[self.time + 1] = self.outside_ah_humid[self.time + 1] + delta_humid_out   # update outside AH
+        # self.outside_ah_humid[self.time + 1] = self.outside_ah_humid[self.time + 1] + delta_humid_out   # update outside AH
 
         # log humidity components
         # FIXME: NON OF THIS SHIT MAKES SENSE
@@ -529,7 +527,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
              }
 
         # heat component plots
-        x = np.arange(24)
+        x = np.arange(SIM_TIME)
         plt.plot(x, d["Global Radiation Gain"], label="Global Radiation Gain")
         plt.plot(x, d["Heater Gain"], label="Heater Gain")
         plt.plot(x, d["Sensible Heat Loss"], label="Sensible Heat Loss")

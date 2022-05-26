@@ -73,7 +73,7 @@ if __name__ == "__main__":
     # actions = [9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7, 9, 10, 10, 10, 10, 8, 7, 7, 5]
     # actions = np.zeros(24, dtype=int).tolist()  # apply cooling the whole time, to test if action space is large enough
     # wat_action = env.action_map(0)
-    for t in range(50):
+    for t in range(80):
         # action = env.action_space.sample()    # random action
         agent_action = env.action_space.n // 2  # take no action
         # agent_action = actions[t]  # specific trajectory
