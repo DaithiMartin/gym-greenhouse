@@ -7,7 +7,7 @@ from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
 
 # Hyper parameters
 # -------------------------------------------------------------------------------#
-NUM_ACTIONS = 31
+NUM_ACTIONS = 41
 
 
 # -------------------------------------------------------------------------------#
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     observation = env.reset()
     print(f"Initial Observation: {observation}")
     # actions = [9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7, 9, 10, 10, 10, 10, 8, 7, 7, 5]
-    # actions = np.zeros(24, dtype=int).tolist()  # apply cooling the whole time, to test if action space is large enough
+    # actions = np.zeros(80, dtype=int).tolist()  # apply cooling the whole time, to test if action space is large enough
     # wat_action = env.action_map(0)
     for t in range(80):
         # action = env.action_space.sample()    # random action

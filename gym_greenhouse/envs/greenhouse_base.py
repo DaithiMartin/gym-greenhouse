@@ -9,14 +9,16 @@ from scipy.integrate import solve_ivp
 # Hyper parameters
 # -------------------------------------------------------------------------------#
 # Environment Type
-ACTION_MAX: float = 1e4  # watts
-ACTION_MIN: float = -1e4  # watts
+ACTION_MAX: float = 2e5  # watts
+ACTION_MIN: float = -2e5  # watts
 
 # Greenhouse simulation
 SPECIFIC_HEAT: float = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
 AIR_DENSITY: float = 1.225  # kg / m^3
 
-SIM_TIME = 3 * 24
+SIM_TIME = 3 * 24   # hours
+
+OUTSIDE_RH = 60
 # -------------------------------------------------------------------------------#
 
 
@@ -83,14 +85,14 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.outside_temp: ArrayLike = self.set_outside_temp()  # set outside temp for episode
         self.solar_radiation: ArrayLike = self.set_radiative_heat()     # set radiative radiation for episode
         self.inside_temp: int = 22      # starting inside temp
-        self.ideal_temp: int = 22       # ideal inside temp
-        self.temp_tolerance: int = 1    # +/- tolerance for ideal temp
+        self.ideal_temp: int = 27       # ideal inside temp
+        self.temp_tolerance: int = 2    # +/- tolerance for ideal temp
         self.outside_rh_humid: ArrayLike = self.set_outside_rh()    # set relative humidity for episode
 
-        self.outside_ah_humid: ArrayLike = self.set_outside_ah()    # FIXME: TESTING
+        self.outside_ah_humid: ArrayLike = self.set_outside_ah()
 
-        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, 20)   # initial inside humid
-        self.ideal_rel_humid: float = 10   # ideal relative humidity in percentage form
+        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, OUTSIDE_RH)   # initial inside humid
+        self.ideal_rel_humid: float = 20   # ideal relative humidity in percentage form
         self.humid_tolerance: float = 5  # +/- tolerance for ideal humidity in percentage form
 
         # histories
@@ -156,7 +158,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
     def render(self,
                mode: str = 'human',
-               report: bool = True):
+               report: bool = False):
 
         """Display episode visualization."""
 
@@ -205,8 +207,8 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
     def close(self):
         pass
 
-    def set_outside_temp(self):
-
+    @staticmethod
+    def set_outside_temp():
 
         base = np.arange(6)
         base = 1.5 * base
@@ -220,7 +222,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
     def set_outside_rh():
         """RH in percentage form, eg: 20% not 0.20"""
 
-        rel_humid = np.full(SIM_TIME + 1, 20)
+        rel_humid = np.full(SIM_TIME + 1, OUTSIDE_RH)
         return rel_humid
 
     @staticmethod
@@ -229,16 +231,26 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         return abs_humid
 
     def get_reward(self, action):
-        # TODO: IMPLEMENT CLIFFING REWARD FUNCTION
+
         inside_temp = self.inside_temp
         ideal_temp = self.ideal_temp
-        tolerance = self.temp_tolerance
+        temp_tolerance = self.temp_tolerance
 
-        # calc current reward
-        reward = -((inside_temp - ideal_temp) ** 2) * 100
+        if ideal_temp + temp_tolerance >= inside_temp >= ideal_temp - temp_tolerance:
+            temp_reward = 1000
+        else:
+            temp_reward = -((inside_temp - ideal_temp) ** 2)
 
-        if ideal_temp + tolerance >= inside_temp >= ideal_temp - tolerance:
-            reward += 1000
+        inside_rh = self.map_abs_to_rel_humid(inside_temp, self.inside_abs_humid)
+        ideal_humid = self.ideal_rel_humid
+        humid_tolerance = self.humid_tolerance
+        if ideal_humid + humid_tolerance >= inside_rh >= ideal_humid - humid_tolerance:
+            humid_reward = 100
+        else:
+            humid_reward = -(np.abs(inside_rh - ideal_humid))
+
+        # TODO: THIS COULD BE WEIGHTED
+        reward = temp_reward + humid_reward
 
         # update history
         self.reward_history.append(reward)

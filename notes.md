@@ -54,3 +54,13 @@ Added ODE components to self.report().
 Investigating the mass balance of humidity. 
 Can't quite figure out why it's not balancing.
 I need to figure out how to update the outside AH to account for what's lost/gained by the greenhouse.
+
+
+## 05.26.2022
+
+---
+
+Remaining additions to codebase:
+1. historical data
+2. add functionality to turn of exploration in agents during assessment.
+3. determine better mapping for humidity action
