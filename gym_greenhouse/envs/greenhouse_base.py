@@ -106,6 +106,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.final_temp_history: List[float] = []  # internal temp history for episode
         self.initial_rel_humid_history: List[float] = []
         self.final_rel_humid_history: List[float] = []
+        self.abs_humidity_history = []
 
         # ODE components
         self.ode_heat_radiation_gain = []
@@ -188,6 +189,14 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         plt.title("Humidity")
         plt.xlabel("Time")
         plt.ylabel("Relative Humidity")
+        plt.legend()
+        plt.show()
+
+        abs_humid = self.abs_humidity_history
+        plt.plot(x, abs_humid, label="Internal")
+        plt.title("Absolute Humidity")
+        plt.ylabel("Absolute Humidity (g water / kg air)")
+        plt.xlabel("Time")
         plt.legend()
         plt.show()
 
@@ -274,6 +283,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         # update histories
         self.final_temp_history.append(self.inside_temp)
+        self.abs_humidity_history.append(self.inside_abs_humid)
         self.final_rel_humid_history.append(self.map_abs_to_rel_humid(self.inside_temp, self.inside_abs_humid))
         self.action_history.append(self.action_map(action))
 
@@ -485,8 +495,8 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         delta_humid_out = -self.get_new_abs_out(new_in_humid, E) #(new_in_humid - W_in)   # calc gain in absolute humidity to climate
         self.outside_ah_humid[self.time + 1] = self.outside_ah_humid[self.time + 1] + delta_humid_out   # update outside AH
 
-
         # log humidity components
+        # FIXME: NON OF THIS SHIT MAKES SENSE
         vent_loss, vent_gain = self.get_humid_vent_bal(new_in_humid, w_abs_out + delta_humid_out)
         self.ode_humid_vent_loss.append(-vent_loss)
         self.ode_humid_vent_gain.append(vent_gain)
@@ -495,7 +505,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
         # checks
         check_energy = Q_GRin + Q_heater - latent_loss - sensible_loss - conductive_loss
-        check_humid = vent_loss - vent_gain - E
+        # check_humid = vent_loss - vent_gain - E
 
         return new_temp, new_in_humid
 
@@ -532,15 +542,15 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         plt.show()
 
         # humidity components
-        plt.plot(x, d["Humidity Vent Loss"], label="Humidity Vent Loss")
-        plt.plot(x, d["Humidity Vent Gain"], label="Humidity Vent Gain")
-        plt.plot(x, d["Humidity Evapotranspiration Gain"], label="Humidity Evapotranspiration Gain")
-        plt.plot(x, d["Humidity Total"], label="Humidity Total")
-        plt.title("Humidity ODE Components")
-        plt.xlabel("Time")
-        plt.ylabel("Absolute Humidity (g water kg^-1 dry air")
-        plt.legend()
-        plt.show()
+        # plt.plot(x, d["Humidity Vent Loss"], label="Humidity Vent Loss")
+        # plt.plot(x, d["Humidity Vent Gain"], label="Humidity Vent Gain")
+        # plt.plot(x, d["Humidity Evapotranspiration Gain"], label="Humidity Evapotranspiration Gain")
+        # plt.plot(x, d["Humidity Total"], label="Humidity Total")
+        # plt.title("Humidity ODE Components")
+        # plt.xlabel("Time")
+        # plt.ylabel("Absolute Humidity (g water kg^-1 dry air")
+        # plt.legend()
+        # plt.show()
 
         df = pd.DataFrame(d)
         return df
