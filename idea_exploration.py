@@ -1,22 +1,27 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
 
-# swing = np.arange(6)
-# swing = 1.5 * swing
-# base_line = 0
-# temps = np.array((swing + base_line, base_line + swing[::-1], np.full(6, base_line), np.full(6, base_line))).flatten()
-# x = np.arange(24)
-# y = temps
-#
-# plt.plot(x,y)
-# plt.show()
+start_month = 3
+end_month = 3
 
-action_min = -10
-action_max = 10
-action_range = range(action_min, action_max + 1)
-num_actions = 21
-index_range = range(num_actions)
-action_map = {}
-for index, action in zip(index_range, action_range):
-    action_map[index] = action
-print(action_map)
+start_year = 2010
+end_year = 2012
+
+df_collector = []
+for year in range(start_year, end_year):
+    date_range = pd.date_range(start=f"{start_month}/1/{year}",
+                               end=f"{end_month + 1}/1/{year}",
+                               freq="D")
+    for date in date_range[:-1]:
+
+        url = f"https://mesowest.utah.edu/cgi-bin/droman/download_api2_handler.cgi?output=csv&product=&stn=KMSO&unit=0&daycalendar=1&hours=1&day1=" \
+              f"{date.day}&month1={date.month:02}&year1={date.year}&time=LOCAL&hour1={0}&var_0=air_temp&var_2=relative_humidity"
+        df = pd.read_csv(url, header=6, skiprows=[7])
+        df.index = pd.to_datetime(df["Date_Time"])
+        df = df.resample("1H").mean()
+        df_collector.append(df)
+
+        print("check")
+
+df = pd.concat(df_collector)
+test = df.groupby([df.index.dt.day]).sum()
+print()
