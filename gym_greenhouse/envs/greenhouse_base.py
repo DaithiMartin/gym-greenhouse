@@ -9,8 +9,8 @@ from scipy.integrate import solve_ivp
 # Hyper parameters
 # -------------------------------------------------------------------------------#
 # Environment Type
-ACTION_MAX: float = 2e5  # watts
-ACTION_MIN: float = -2e5  # watts
+ACTION_MAX: float = 10  # watts
+ACTION_MIN: float = -10  # watts
 
 # Greenhouse simulation
 SPECIFIC_HEAT: float = 1005.0  # J * kg^-1 K^-1, specific heat of "ambient" air
@@ -100,7 +100,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.outside_ah_humid: ArrayLike = self.map_rel_to_abs_humid(self.outside_temp, self.outside_rh_humid)
         self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, self.outside_rh_humid[0])   # initial inside humid
 
-        self.ideal_rel_humid: float = 20   # ideal relative humidity in percentage form
+        self.ideal_rel_humid: float = self.outside_rh_humid[0]   # ideal relative humidity in percentage form
         self.humid_tolerance: float = 5  # +/- tolerance for ideal humidity in percentage form
 
         # histories
@@ -342,9 +342,11 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         max_Q_GRout = 1025  # W m^-2
         day_length = 12
         day = np.sin(np.linspace(0, np.pi, day_length)) * max_Q_GRout
-        night = np.zeros(12)
+        night = np.zeros(6)
 
-        full_day = np.concatenate((day, night))
+        morning = np.zeros(6)
+
+        full_day = np.concatenate((morning, day, night))
         Q_GRout = np.concatenate((full_day, full_day, full_day))
         Q_GRout = np.concatenate((Q_GRout, np.array([0])))
 
@@ -486,7 +488,8 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         """
 
         # Q_heater
-        Q_heater = self.get_q_heater(action)
+        # Q_heater = self.get_q_heater(action)
+        Q_heater = 0
 
         # Q_GRin
         tau_c = 0.9  # solar radiation transmittance of glazing material (dimensionless)
@@ -503,11 +506,13 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         t_span = (0, 60 * 60)   # ode time period, 60 sec min^-1 * 60 min hr^-1
         T_out = self.outside_temp[self.time]
         T_in = self.inside_temp
+        # T_in += self.action_map(action)
 
         # energy ode solver
         energy_args = (Q_GRin, Q_heater, E, T_out)
         energy_sol = solve_ivp(self.energy_bal, t_span, [T_in], args=energy_args)
         new_temp = energy_sol.y[:, -1].item()
+        new_temp += self.action_map(action)
 
         # log heat components
         self.ode_heat_heater_gain.append(Q_heater)
@@ -530,7 +535,6 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         # self.outside_ah_humid[self.time + 1] = self.outside_ah_humid[self.time + 1] + delta_humid_out   # update outside AH
 
         # log humidity components
-        # FIXME: NON OF THIS SHIT MAKES SENSE
         vent_loss, vent_gain = self.get_humid_vent_bal(new_in_humid, w_abs_out + delta_humid_out)
         self.ode_humid_vent_loss.append(-vent_loss)
         self.ode_humid_vent_gain.append(vent_gain)

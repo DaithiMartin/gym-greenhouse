@@ -7,7 +7,7 @@ from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
 
 # Hyper parameters
 # -------------------------------------------------------------------------------#
-NUM_ACTIONS = 41
+NUM_ACTIONS = 21
 
 
 # -------------------------------------------------------------------------------#
@@ -77,6 +77,7 @@ if __name__ == "__main__":
         # action = env.action_space.sample()    # random action
         agent_action = env.action_space.n // 2  # take no action
         # agent_action = actions[t]  # specific trajectory
+        # agent_action = 0
         observation, reward, done, info = env.step(agent_action)
         # print(f"Observation {t + 1}: {observation}")
         if done:
