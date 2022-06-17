@@ -18,7 +18,9 @@ AIR_DENSITY: float = 1.225  # kg / m^3
 
 SIM_TIME = 3 * 24   # hours
 
-OUTSIDE_RH = 60
+# OUTSIDE_RH = 60
+WEATHER_DATA_PATH = "../../weather_data/sample_data.csv"
+RANDOM_WEATHER_SAMPLE = False
 # -------------------------------------------------------------------------------#
 
 
@@ -82,16 +84,22 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         # state variables
         self.observation_space: gym.spaces = gym.spaces.Discrete(6)
         self.time: int = 0  # hour of the day
-        self.outside_temp: ArrayLike = self.set_outside_temp()  # set outside temp for episode
-        self.solar_radiation: ArrayLike = self.set_radiative_heat()     # set radiative radiation for episode
-        self.inside_temp: int = 22      # starting inside temp
+
+        self.outside_rh_humid = None
+        self.outside_temp = None
+        self.solar_radiation: ArrayLike = self.set_radiative_heat()
+        self.generate_outside_environment()
+
+        # self.outside_temp: ArrayLike = self.set_outside_temp()  # set outside temp for episode
+
+        self.inside_temp: int = self.outside_temp[0]      # starting inside temp
         self.ideal_temp: int = 27       # ideal inside temp
         self.temp_tolerance: int = 2    # +/- tolerance for ideal temp
-        self.outside_rh_humid: ArrayLike = self.set_outside_rh()    # set relative humidity for episode
+        # self.outside_rh_humid: ArrayLike = self.set_outside_rh()    # set relative humidity for episode
 
-        self.outside_ah_humid: ArrayLike = self.set_outside_ah()
+        self.outside_ah_humid: ArrayLike = self.map_rel_to_abs_humid(self.outside_temp, self.outside_rh_humid)
+        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, self.outside_rh_humid[0])   # initial inside humid
 
-        self.inside_abs_humid: float = self.map_rel_to_abs_humid(self.inside_temp, OUTSIDE_RH)   # initial inside humid
         self.ideal_rel_humid: float = 20   # ideal relative humidity in percentage form
         self.humid_tolerance: float = 5  # +/- tolerance for ideal humidity in percentage form
 
@@ -167,7 +175,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         temp_external = self.outside_temp[:-1]  # exclude last time because that's hour 25
         temp_internal = self.final_temp_history
         temp_ideal = np.full(SIM_TIME, self.ideal_temp)
-        plt.plot(x, temp_external, label="External")
+        plt.plot(x, temp_external, 'v-', label="External")
         plt.plot(x, temp_internal, 'o-', label="Internal")
         plt.fill_between(x, temp_ideal + self.temp_tolerance, temp_ideal - self.temp_tolerance,
                          label="Ideal", alpha=0.3, color='g')
@@ -181,7 +189,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         humid_external = self.outside_rh_humid[:-1]
         humid_internal = self.final_rel_humid_history
         humid_ideal = np.full(SIM_TIME, self.ideal_rel_humid)
-        plt.plot(x, humid_external, label="External")
+        plt.plot(x, humid_external, 'v-', label="External")
         plt.plot(x, humid_internal, 'o-', label="Internal")
         plt.fill_between(x, humid_ideal + self.humid_tolerance, humid_ideal - self.humid_tolerance,
                          label="Ideal", alpha=0.3, color='y')
@@ -207,6 +215,22 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
     def close(self):
         pass
 
+    def generate_outside_environment(self):
+        data = pd.read_csv(WEATHER_DATA_PATH, index_col=0)
+        data.index = pd.to_datetime(data.index)
+
+        sample_range = pd.date_range(data.index[0], data.index[-72], freq="D")
+
+        if RANDOM_WEATHER_SAMPLE:
+            index = np.random.randint(0, len(sample_range) - 3)
+        else:
+            index = 0
+
+        sample = data.loc[sample_range[index]: sample_range[index + 3]]
+        self.outside_temp = sample["air_temp_set_1"].array
+        self.outside_rh_humid = sample["relative_humidity_set_1"].array
+        return None
+
     @staticmethod
     def set_outside_temp():
 
@@ -220,10 +244,10 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
 
     @staticmethod
     def set_outside_rh():
-        """RH in percentage form, eg: 20% not 0.20"""
+        """RH in percentage form, eg: 20.0% not 0.20"""
 
-        rel_humid = np.full(SIM_TIME + 1, OUTSIDE_RH)
-        return rel_humid
+        # rel_humid = np.full(SIM_TIME + 1, OUTSIDE_RH)
+        return None
 
     @staticmethod
     def set_outside_ah():
