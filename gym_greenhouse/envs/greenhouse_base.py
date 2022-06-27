@@ -307,17 +307,18 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         self.initial_rel_humid_history.append(self.map_abs_to_rel_humid(self.inside_temp, self.inside_abs_humid))
 
         # agent takes action and environment reacts
-        new_temp, new_humid = self.get_temp_humid(action)
+        new_temp, new_rel_humid = self.get_temp_humid(action)
 
         # update instance state
         self.inside_temp = new_temp
-        self.inside_abs_humid = new_humid
+        self.inside_abs_humid = self.map_rel_to_abs_humid(new_temp, new_rel_humid)
 
         # update histories
         self.final_temp_history.append(self.inside_temp)
         self.abs_humidity_history.append(self.inside_abs_humid)
-        self.final_rel_humid_history.append(self.map_abs_to_rel_humid(self.inside_temp, self.inside_abs_humid))
-        self.action_history.append(self.action_map(action))
+        # self.final_rel_humid_history.append(self.map_abs_to_rel_humid(self.inside_temp, self.inside_abs_humid))
+        self.final_rel_humid_history.append(new_rel_humid)
+        self.action_history.append((self.action_map(action[0]), self.action_map(action[1])))
 
         # increment time
         self.time += 1
@@ -512,7 +513,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         energy_args = (Q_GRin, Q_heater, E, T_out)
         energy_sol = solve_ivp(self.energy_bal, t_span, [T_in], args=energy_args)
         new_temp = energy_sol.y[:, -1].item()
-        new_temp += self.action_map(action)
+        new_temp += self.action_map(action[0])
 
         # log heat components
         self.ode_heat_heater_gain.append(Q_heater)
@@ -531,6 +532,8 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         humid_args = (E, w_abs_out)
         humid_sol = solve_ivp(self.water_balance, t_span, [W_in], args=humid_args)
         new_in_humid = humid_sol.y[:, -1].item()   # absolute humidity
+        new_rel_in_humid = self.map_abs_to_rel_humid(new_temp, new_in_humid)
+        new_rel_in_humid += self.action_map(action[1])
         delta_humid_out = -self.get_new_abs_out(new_in_humid, E) #(new_in_humid - W_in)   # calc gain in absolute humidity to climate
         # self.outside_ah_humid[self.time + 1] = self.outside_ah_humid[self.time + 1] + delta_humid_out   # update outside AH
 
@@ -545,7 +548,7 @@ class GreenhouseBaseEnv(gym.Env, Generic[T]):
         check_energy = Q_GRin + Q_heater - latent_loss - sensible_loss - conductive_loss
         # check_humid = vent_loss - vent_gain - E
 
-        return new_temp, new_in_humid
+        return new_temp, new_rel_in_humid
 
     def report(self) -> pd.DataFrame:
         # TODO: FIGURE OUT HOW INCLUDE ACTIONS IN REPORT

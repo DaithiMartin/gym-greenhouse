@@ -9,7 +9,6 @@ from gym_greenhouse.envs.greenhouse_base import GreenhouseBaseEnv
 # -------------------------------------------------------------------------------#
 NUM_ACTIONS = 21
 
-
 # -------------------------------------------------------------------------------#
 
 
@@ -75,9 +74,9 @@ if __name__ == "__main__":
     # wat_action = env.action_map(0)
     for t in range(80):
         # action = env.action_space.sample()    # random action
-        agent_action = env.action_space.n // 2  # take no action
+        # agent_action = NUM_ACTIONS // 2, NUM_ACTIONS // 2  # take no action
         # agent_action = actions[t]  # specific trajectory
-        # agent_action = 0
+        agent_action = 10, 10
         observation, reward, done, info = env.step(agent_action)
         # print(f"Observation {t + 1}: {observation}")
         if done:
